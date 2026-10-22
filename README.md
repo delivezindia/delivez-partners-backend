@@ -8,32 +8,45 @@ The web apps live in [delivez-partners-frontend](https://github.com/delivezindia
 | API (NestJS) | `apps/core-api` — `/v1`, Swagger at `/docs` |
 | Database (Prisma schema + migrations + seed) | `packages/db` |
 | Translations | `packages/i18n` |
-| Docker deploy | `deploy/backend` |
+| Server scripts | `deploy/backend` |
 
-## Deploy (Docker)
-Needs Docker + Docker Compose v2.
+## Server setup (once)
+Needs **Node.js 20+**, **pnpm 9** (`npm i -g pnpm@9`), **PM2** (`npm i -g pm2`), **PostgreSQL 14+**, **Redis** (recommended), **git** and **nginx**.
 ```bash
-git clone https://github.com/delivezindia/delivez-partners-backend.git && cd delivez-partners-backend/deploy/backend
+# Database
+sudo -u postgres psql -c "CREATE USER delivez WITH PASSWORD 'choose-a-password';"
+sudo -u postgres psql -c "CREATE DATABASE delivez_core OWNER delivez;"
+
+cd /var/www && git clone https://github.com/delivezindia/delivez-partners-backend.git && cd delivez-partners-backend
 cp .env.example .env
-docker run --rm -v "$PWD/../..":/app -w /app node:20-alpine node scripts/generate-secrets.mjs
-#   → paste the printed lines into .env; set PUBLIC_API_URL, CORS_ORIGINS, PARTNERS_WEB_URL, FIREBASE_*, MSG91_*
+pnpm install && pnpm secrets        # prints secrets → paste into .env
+#   edit .env: DATABASE_URL, REDIS_URL, PUBLIC_API_URL, CORS_ORIGINS, PARTNERS_WEB_URL, FIREBASE_*, MSG91_*
 mkdir -p secrets && cp /path/to/firebase-service-account.json secrets/   # from the project owner, not in git
-docker compose up -d --build
-docker compose exec api sh -c "cd packages/db && npx tsx prisma/seed.ts"  # first install only
+
+chmod +x deploy/backend/update.sh deploy/backend/hooks/*
+git config core.hooksPath deploy/backend/hooks    # every future git pull updates + restarts automatically
+./deploy/backend/update.sh                        # first install: migrate, build, start with PM2
+pnpm db:seed                                      # first install only: city, zones, PIN codes, admins, demo store
+pm2 startup                                       # follow the printed command so the API starts after reboots
 ```
-Expose port 4000 as `https://api.<domain>` (allow WebSockets for `/socket.io`). Health: `/v1/health`.
+Then nginx: copy `deploy/backend/nginx-api.conf`, set `server_name api.<domain>`, enable, reload, and `sudo certbot --nginx -d api.<domain>`. Check: `https://api.<domain>/v1/health`.
 
-**Update:** `git pull && docker compose up -d --build` — database migrations run automatically on start.
+## Updating
+```bash
+cd /var/www/delivez-partners-backend && git pull
+```
+That's it — the hook installs packages, applies database migrations, rebuilds and restarts the API.
 
-| Task | Command (in `deploy/backend`) |
+| Task | Command |
 |---|---|
-| Logs (login codes appear here while `SMS_PROVIDER=DEV`) | `docker compose logs -f api` |
-| Apply .env changes | `docker compose up -d api` |
-| Backup | `docker compose exec db pg_dump -U delivez delivez_core > backup.sql` |
+| Logs (login codes appear here while `SMS_PROVIDER=DEV`) | `pm2 logs delivez-api` |
+| Restart after editing `.env` | `pm2 restart delivez-api` |
+| Status | `pm2 status` |
+| Database backup | `pg_dump -U delivez delivez_core > backup-$(date +%F).sql` |
 
-Before real partners: MSG91 + DLT templates for login SMS, real admin accounts (seed creates test ones), fresh Firebase key, scheduled backups of the database and the `uploads` volume.
+Before real partners: MSG91 + DLT templates for login SMS, real admin accounts (the seed creates test ones), a fresh Firebase key, scheduled backups of the database and the uploads folder (`UPLOAD_DIR`, default `apps/core-api/uploads`).
 
 ## Local development
-1. Node 20+, `npm i -g pnpm@9`, PostgreSQL.
-2. `cp .env.example .env` (set `DATABASE_URL`) · `pnpm install` · `pnpm db:migrate` · `pnpm db:seed` · `pnpm dev`
+1. Node 20+, pnpm 9, PostgreSQL.
+2. `cp .env.example .env` (set `DATABASE_URL`; leave the server sections empty) · `pnpm install` · `pnpm db:migrate` · `pnpm db:seed` · `pnpm dev`
 3. API on http://localhost:4000/v1 (Swagger `/docs`). Tests: `pnpm test`.

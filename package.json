@@ -16,6 +16,7 @@
     "db:seed": "pnpm --filter @delivez/db seed",
     "db:reset": "pnpm --filter @delivez/db reset",
     "db:studio": "pnpm --filter @delivez/db studio",
+    "db:deploy": "pnpm --filter @delivez/db run deploy",
     "secrets": "node scripts/generate-secrets.mjs"
   }
 }

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# git runs this after every `git pull` that brings in new commits.
+# Enabled once per server with:  git config core.hooksPath deploy/backend/hooks
+exec "$(git rev-parse --show-toplevel)/deploy/backend/update.sh"
