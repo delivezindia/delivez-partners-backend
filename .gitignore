@@ -7,3 +7,4 @@ coverage
 .keys
 uploads
 secrets
+*.tsbuildinfo
