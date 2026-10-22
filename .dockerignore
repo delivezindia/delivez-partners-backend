@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.keys
+**/uploads
+**/.env
+**/.env.*
+!**/.env.example
+**/secrets
+.git
+docs
+*.log
+coverage

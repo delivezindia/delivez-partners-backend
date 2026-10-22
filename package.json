@@ -1,0 +1,21 @@
+{
+  "name": "delivez-partners-backend",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "scripts": {
+    "dev": "turbo run dev --filter=@delivez/core-api",
+    "build": "turbo run build --filter=@delivez/core-api",
+    "typecheck": "turbo run typecheck",
+    "test": "pnpm --filter @delivez/core-api test",
+    "db:generate": "pnpm --filter @delivez/db generate",
+    "db:migrate": "pnpm --filter @delivez/db migrate",
+    "db:seed": "pnpm --filter @delivez/db seed",
+    "db:reset": "pnpm --filter @delivez/db reset",
+    "db:studio": "pnpm --filter @delivez/db studio",
+    "secrets": "node scripts/generate-secrets.mjs"
+  }
+}

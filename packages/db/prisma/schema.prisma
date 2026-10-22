@@ -1,0 +1,2151 @@
+// =====================================================================
+//  DELIVEZ CORE — PostgreSQL schema (Prisma)
+//  Serves: Delivez Partners (web + mobile), Delivez Local (web + mobile),
+//          Delivez Admin (web), Delivez Rider (future), Delivez One (existing)
+//  Conventions: snake_case tables via @@map, UUID primary keys, soft-delete
+//  only where business history matters, money in paise (Int), timestamps UTC.
+//
+//  Local changes vs. plan Appendix A (see docs/PARTNERS_IMPLEMENTATION_PLAN.md):
+//   - postgis extension added later by migration (not installed locally yet)
+//   - Store location/contact fields nullable while DRAFT; enforced on submit
+//   - PartnerMember.pinHash, Pharmacist.user relation
+//   - Outbox and FeatureFlag as Prisma models
+// =====================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto]
+}
+
+// ---------------------------------------------------------------------
+// 0. PLATFORM (outbox, feature flags)
+// ---------------------------------------------------------------------
+
+// Transactional outbox — domain events written in the same transaction as the change.
+model Outbox {
+  id            String    @id @default(uuid())
+  type          String
+  payload       Json
+  correlationId String?
+  createdAt     DateTime  @default(now())
+  publishedAt   DateTime?
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox")
+}
+
+model FeatureFlag {
+  key       String   @id
+  enabled   Boolean  @default(false)
+  cityIds   String[] @default([])
+  storeIds  String[] @default([])
+  updatedAt DateTime @updatedAt
+
+  @@map("feature_flags")
+}
+
+// ---------------------------------------------------------------------
+// 1. IDENTITY & ACCESS  (shared by every Delivez app)
+// ---------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  DELETED
+}
+
+enum Language {
+  EN
+  HI
+  KN
+  TA
+  TE
+  ML
+  MR
+  BN
+}
+
+model User {
+  id            String     @id @default(uuid())
+  phone         String     @unique // E.164, +91XXXXXXXXXX — the identity anchor
+  phoneVerified Boolean    @default(false)
+  email         String?    @unique
+  fullName      String?
+  avatarUrl     String?
+  language      Language   @default(EN)
+  status        UserStatus @default(ACTIVE)
+  lastLoginAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  customer       Customer?
+  partnerMembers PartnerMember[]
+  adminUser      AdminUser?
+  rider          Rider?
+  pharmacists    Pharmacist[]
+  sessions       Session[]
+  deviceTokens   DeviceToken[]
+  addresses      Address[]
+  consents       ConsentRecord[]
+  notifications  Notification[]
+  auditLogs      AuditLog[]      @relation("actor")
+  supportTickets SupportTicket[]
+  ticketMessages TicketMessage[]
+
+  @@map("users")
+}
+
+enum OtpPurpose {
+  LOGIN
+  ONBOARDING
+  BANK_CHANGE
+  PHONE_CHANGE
+}
+
+model OtpRequest {
+  id        String     @id @default(uuid())
+  phone     String
+  codeHash  String
+  purpose   OtpPurpose
+  channel   String     @default("SMS") // SMS | WHATSAPP
+  attempts  Int        @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime   @default(now())
+
+  @@index([phone, purpose, createdAt])
+  @@map("otp_requests")
+}
+
+enum AppId {
+  PARTNERS
+  LOCAL
+  ADMIN
+  RIDER
+  ONE
+}
+
+model Session {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  app              AppId
+  refreshTokenHash String    @unique
+  deviceInfo       Json?
+  ip               String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId, app])
+  @@map("sessions")
+}
+
+enum DevicePlatform {
+  ANDROID
+  IOS
+  WEB
+}
+
+model DeviceToken {
+  id        String         @id @default(uuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  app       AppId
+  platform  DevicePlatform
+  token     String         @unique
+  isActive  Boolean        @default(true)
+  updatedAt DateTime       @updatedAt
+
+  @@index([userId, app])
+  @@map("device_tokens")
+}
+
+enum AdminRole {
+  FOUNDER
+  HEAD_OF_OPS
+  REGIONAL_HEAD
+  CITY_OPS
+  COMPLIANCE
+  FINANCE
+  LEGAL
+  SUPPORT
+  SALES_AGENT
+  AUDITOR
+}
+
+model AdminUser {
+  id        String    @id @default(uuid())
+  userId    String    @unique
+  user      User      @relation(fields: [userId], references: [id])
+  role      AdminRole
+  cityIds   String[] // scope; empty = all cities
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  reviewedDocuments PartnerDocument[]   @relation("documentReviewer")
+  adminActions      AdminAction[]
+  referrals         OnboardingSession[] @relation("salesAgent")
+  settlementsPaid   Settlement[]        @relation("settlementApprover")
+
+  @@map("admin_users")
+}
+
+// ---------------------------------------------------------------------
+// 2. GEOGRAPHY & SERVICEABILITY
+// ---------------------------------------------------------------------
+
+model City {
+  id        String  @id @default(uuid())
+  name      String
+  state     String // e.g. "Karnataka" — drives StateDrugRule & legal rider
+  isActive  Boolean @default(true)
+  timezone  String  @default("Asia/Kolkata")
+  centerLat Float
+  centerLng Float
+
+  zones     Zone[]
+  pincodes  Pincode[]
+  stores    Store[]
+  incidents Incident[]
+
+  @@unique([name, state])
+  @@map("cities")
+}
+
+model Zone {
+  id       String  @id @default(uuid())
+  cityId   String
+  city     City    @relation(fields: [cityId], references: [id])
+  name     String
+  polygon  Json // GeoJSON polygon; PostGIS geometry column added via raw migration
+  isActive Boolean @default(true)
+
+  pincodes Pincode[]
+  stores   Store[]
+
+  @@unique([cityId, name])
+  @@map("zones")
+}
+
+model Pincode {
+  code        String  @id
+  cityId      String
+  city        City    @relation(fields: [cityId], references: [id])
+  zoneId      String?
+  zone        Zone?   @relation(fields: [zoneId], references: [id])
+  serviceable Boolean @default(true)
+
+  @@map("pincodes")
+}
+
+model StateDrugRule {
+  id                   String   @id @default(uuid())
+  state                String   @unique
+  codAllowedForRx      Boolean  @default(false)
+  scheduleHRequiresRx  Boolean  @default(true)
+  scheduleH1RequiresRx Boolean  @default(true)
+  scheduleXAllowed     Boolean  @default(false)
+  rxValidityDays       Int      @default(180)
+  legalRiderDocId      String?
+  notes                String?
+  updatedAt            DateTime @updatedAt
+
+  @@map("state_drug_rules")
+}
+
+// ---------------------------------------------------------------------
+// 3. PARTNERS, STORES & ONBOARDING  (Delivez Partners app)
+// ---------------------------------------------------------------------
+
+enum PartnerType {
+  INDIVIDUAL // street vendor / society vendor
+  PROPRIETORSHIP
+  PARTNERSHIP
+  PVT_LTD
+  LLP
+  OTHER
+}
+
+model PartnerAccount {
+  id            String      @id @default(uuid())
+  legalName     String
+  displayName   String
+  partnerType   PartnerType @default(PROPRIETORSHIP)
+  gstin         String?
+  pan           String?
+  contactPhone  String
+  contactEmail  String?
+  whatsappPhone String?
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  members      PartnerMember[]
+  stores       Store[]
+  bankAccounts BankAccount[]
+  documents    PartnerDocument[]
+
+  @@map("partner_accounts")
+}
+
+enum PartnerRole {
+  OWNER
+  MANAGER
+  KITCHEN_LEAD
+  COUNTER_STAFF
+  PHARMACIST
+  ACCOUNTANT
+}
+
+model PartnerMember {
+  id               String         @id @default(uuid())
+  userId           String
+  user             User           @relation(fields: [userId], references: [id])
+  partnerAccountId String
+  partnerAccount   PartnerAccount @relation(fields: [partnerAccountId], references: [id])
+  role             PartnerRole
+  storeIds         String[] // empty = all stores of the account
+  invitedByUserId  String?
+  pinHash          String? // 4-digit quick-switch PIN for shared tablets (scrypt)
+  isActive         Boolean        @default(true)
+  acceptedAt       DateTime? // null + inactive = pending invite; set on first login after the invite
+  createdAt        DateTime       @default(now())
+
+  @@unique([userId, partnerAccountId])
+  @@map("partner_members")
+}
+
+enum Vertical {
+  EAT // restaurants, cloud kitchens
+  GROCERY // grocery, kirana, supermarkets
+  PHARMACY // licensed pharmacies
+  DIAGNOSTICS // certified pathology labs: tests & packages, home collection / walk-in
+  LOCAL_STORES // bakery, meat, flowers, electronics, clothing, beauty, pet, baby, printing...
+  RUSH // Delivez dark stores (later)
+  FETCH // errand / pick-and-fetch (later)
+}
+
+enum StoreType {
+  RESTAURANT
+  CLOUD_KITCHEN
+  SUPERMARKET
+  KIRANA
+  GROCERY
+  PHARMACY_RETAIL
+  PHARMACY_CHAIN
+  PHARMACY_HOSPITAL
+  DIAGNOSTIC_LAB
+  DIAGNOSTIC_CHAIN
+  HOSPITAL_LAB
+  BAKERY
+  MEAT_FISH
+  FLOWER
+  ELECTRONICS
+  CLOTHING
+  BEAUTY_WELLNESS
+  HOUSEHOLD_LIFESTYLE
+  BABY_CARE
+  PET_CARE
+  PRINTING
+  STREET_VENDOR
+  SOCIETY_VENDOR
+  OTHER
+}
+
+// Lifecycle (set by onboarding + admin). Distinct from live OPEN/BUSY/CLOSED.
+enum StoreStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  LIVE
+  LIMITED // live but docs/issues pending (soft launch)
+  PAUSED // paused by admin or store
+  SUSPENDED // compliance failure
+  REJECTED
+  CLOSED
+}
+
+enum StoreOpenState {
+  OPEN
+  BUSY
+  CLOSED
+}
+
+model Store {
+  id               String         @id @default(uuid())
+  partnerAccountId String
+  partnerAccount   PartnerAccount @relation(fields: [partnerAccountId], references: [id])
+  name             String
+  slug             String         @unique
+  vertical         Vertical
+  storeType        StoreType
+  cuisines         String[] // EAT only
+  description      String?
+  logoUrl          String?
+  coverUrl         String?
+  phone            String? // required on submit
+  whatsappPhone    String?
+  email            String?
+
+  // location — nullable while DRAFT, required on submit
+  addressLine1      String?
+  addressLine2      String?
+  landmark          String?
+  pincode           String?
+  cityId            String?
+  city              City?   @relation(fields: [cityId], references: [id])
+  zoneId            String?
+  zone              Zone?   @relation(fields: [zoneId], references: [id])
+  lat               Float?
+  lng               Float?
+  geohash           String? // 7-char, for nearby queries; PostGIS point via migration
+  addressConfidence String? // HIGH | MEDIUM | LOW (AI address confidence)
+  landmarkPhotoUrl  String?
+
+  // lifecycle
+  status              StoreStatus    @default(DRAFT)
+  openState           StoreOpenState @default(CLOSED)
+  closedReason        String?
+  readinessScore      Int            @default(0)
+  probationOrdersLeft Int            @default(100) // SLA penalties soft-disabled while > 0
+  probationEndsAt     DateTime?
+  liveAt              DateTime?
+  rejectedReason      String?
+
+  // operations
+  supportsDelivery     Boolean @default(true)
+  supportsPickup       Boolean @default(true)
+  deliveryRadiusKm     Float   @default(5)
+  expressEnabled       Boolean @default(true)
+  defaultPrepMinutes   Int     @default(25)
+  peakPrepMinutes      Int     @default(35)
+  aiPrepEnabled        Boolean @default(true)
+  aiAlertsEnabled      Boolean @default(true)
+  aiAutoExtendEta      Boolean @default(false)
+  aiMenuAutoPause      Boolean @default(false)
+  aiAggressiveness     Int     @default(50) // 0..100
+  acceptMultipleOrders Boolean @default(true)
+  allowSubstitutions   Boolean @default(false)
+  maxOrdersPerHour     Int?
+  autoPauseOverloaded  Boolean @default(true)
+  autoAcceptOrders     Boolean @default(false)
+  minOrderAmount       Int     @default(0) // paise
+  packagingFee         Int     @default(0) // paise
+  collectionFee        Int     @default(0) // paise — labs: home sample collection fee
+  avgRating            Float   @default(0)
+  ratingCount          Int     @default(0)
+
+  // pharmacy-specific
+  allowGenericSubstitution Boolean @default(false)
+  contactIfRxUnclear       Boolean @default(true)
+  selfPackagingConfirmed   Boolean @default(false)
+
+  // commercials
+  commissionPct     Float  @default(0) // 0% launch offer
+  settlementCycle   String @default("WEEKLY") // DAILY | T_PLUS_1 | WEEKLY
+  deliveryFeeBearer String @default("CUSTOMER") // CUSTOMER | STORE | SPLIT
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  timings         StoreTiming[]
+  holidays        StoreHoliday[]
+  categories      Category[]
+  products        Product[]
+  documents       PartnerDocument[]
+  pharmacists     Pharmacist[]
+  pathologists    Pathologist[]
+  labBookings     LabBooking[]
+  onboarding      OnboardingSession?
+  orders          Order[]
+  carts           Cart[]
+  prescriptions   Prescription[]
+  reviews         Review[]
+  settlements     Settlement[]
+  ledgerEntries   LedgerEntry[]
+  penalties       Penalty[]
+  incidents       Incident[]
+  slaRecords      SlaRecord[]
+  adminActions    AdminAction[]
+  throttles       StoreThrottle[]
+  aiPredictions   AiPrediction[]
+  waConversations WhatsAppConversation[]
+  catalogSyncs    WhatsAppCatalogSync[]
+  dailyStats      StoreDailyStat[]
+
+  @@index([cityId, vertical, status, openState])
+  @@index([geohash])
+  @@map("stores")
+}
+
+model StoreTiming {
+  id        String  @id @default(uuid())
+  storeId   String
+  store     Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  dayOfWeek Int // 0=Sun .. 6=Sat
+  opensAt   String // "10:00"
+  closesAt  String // "23:00"
+  isClosed  Boolean @default(false)
+
+  @@unique([storeId, dayOfWeek, opensAt])
+  @@map("store_timings")
+}
+
+model StoreHoliday {
+  id      String   @id @default(uuid())
+  storeId String
+  store   Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  date    DateTime @db.Date
+  reason  String?
+
+  @@unique([storeId, date])
+  @@map("store_holidays")
+}
+
+enum OnboardingChannel {
+  WEB
+  MOBILE
+  WHATSAPP
+  ADMIN
+}
+
+enum OnboardingStatus {
+  DRAFT
+  SUBMITTED
+  NEEDS_CHANGES
+  APPROVED
+  REJECTED
+}
+
+model OnboardingSession {
+  id                 String            @id @default(uuid())
+  storeId            String            @unique
+  store              Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  channel            OnboardingChannel
+  status             OnboardingStatus  @default(DRAFT)
+  currentStep        String // e.g. "BASIC_DETAILS", "OUTLET", "DOCUMENTS", ...
+  completedSteps     String[]
+  stepData           Json // draft answers per step (resumable)
+  flowVersion        String // "RESTAURANT_V1" | "STORE_V1" | "PHARMACY_V1" | "VENDOR_V1"
+  referralCode       String?
+  salesAgentId       String?
+  salesAgent         AdminUser?        @relation("salesAgent", fields: [salesAgentId], references: [id])
+  entryPoint         String? // WEBSITE_CTA | QR | SALES_LINK | MISSED_CALL | ADMIN_INVITE
+  trainingDone       Boolean           @default(false)
+  quizScore          Int?
+  testOrderDone      Boolean           @default(false)
+  readinessBreakdown Json? // {docs:25, menu:25, prep:20, bank:20, legal:10}
+  startedAt          DateTime          @default(now())
+  submittedAt        DateTime?
+  completedAt        DateTime?
+  updatedAt          DateTime          @updatedAt
+
+  events OnboardingEvent[]
+
+  @@index([status, channel])
+  @@map("onboarding_sessions")
+}
+
+model OnboardingEvent {
+  id        String            @id @default(uuid())
+  sessionId String
+  session   OnboardingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  step      String
+  action    String // STARTED | COMPLETED | SKIPPED | HANDOFF_TO_HUMAN | DROPPED
+  actorType String // PARTNER | AI | ADMIN | SYSTEM
+  meta      Json?
+  createdAt DateTime          @default(now())
+
+  @@index([sessionId, createdAt])
+  @@map("onboarding_events")
+}
+
+enum DocumentType {
+  FSSAI
+  GSTIN
+  PAN
+  DRUG_LICENSE_DL20
+  DRUG_LICENSE_DL21
+  PHARMACIST_REGISTRATION
+  NABL_CERTIFICATE // lab accreditation (ISO 15189)
+  CLINICAL_ESTABLISHMENT_REG // state clinical establishment registration (KPME in Karnataka)
+  PATHOLOGIST_REGISTRATION // medical council registration of the signing pathologist
+  ADDRESS_PROOF
+  BANK_PROOF
+  SHOP_ESTABLISHMENT
+  TRADE_LICENSE
+  LANDMARK_PHOTO
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+model PartnerDocument {
+  id               String            @id @default(uuid())
+  partnerAccountId String?
+  partnerAccount   PartnerAccount?   @relation(fields: [partnerAccountId], references: [id])
+  storeId          String?
+  store            Store?            @relation(fields: [storeId], references: [id])
+  type             DocumentType
+  documentNumber   String?
+  fileUrl          String
+  fileHash         String?
+  issuedAt         DateTime?
+  expiresAt        DateTime?
+  status           DocumentStatus    @default(PENDING)
+  ocrData          Json? // extracted fields + validation flags
+  nameMatchScore   Float?
+  reviewedById     String?
+  reviewedBy       AdminUser?        @relation("documentReviewer", fields: [reviewedById], references: [id])
+  reviewedAt       DateTime?
+  rejectionReason  String?
+  uploadedVia      OnboardingChannel @default(WEB)
+  createdAt        DateTime          @default(now())
+
+  @@index([storeId, type, status])
+  @@index([expiresAt])
+  @@map("partner_documents")
+}
+
+enum BankVerificationStatus {
+  UNVERIFIED
+  PENNY_DROP_PENDING
+  VERIFIED
+  FAILED
+}
+
+model BankAccount {
+  id                 String                 @id @default(uuid())
+  partnerAccountId   String
+  partnerAccount     PartnerAccount         @relation(fields: [partnerAccountId], references: [id])
+  accountHolderName  String
+  accountNumberEnc   String? // AES-256-GCM encrypted; null for UPI-only vendors
+  accountNumberLast4 String?
+  ifsc               String?
+  bankName           String?
+  upiId              String?
+  verificationStatus BankVerificationStatus @default(UNVERIFIED)
+  pennyDropRef       String?
+  nameMatchScore     Float?
+  isPrimary          Boolean                @default(true)
+  createdAt          DateTime               @default(now())
+
+  settlements Settlement[]
+
+  @@map("bank_accounts")
+}
+
+/// Pathologist who reviews and signs reports for a DIAGNOSTICS store.
+model Pathologist {
+  id             String    @id @default(uuid())
+  storeId        String
+  store          Store     @relation(fields: [storeId], references: [id])
+  name           String
+  qualification  String // MD Pathology, DCP, DNB…
+  registrationNo String
+  stateCouncil   String
+  isActive       Boolean   @default(true)
+  consentAt      DateTime? // "reports will be reviewed and signed by me"
+  createdAt      DateTime  @default(now())
+
+  reports LabReport[]
+
+  @@unique([registrationNo, stateCouncil, storeId])
+  @@map("pathologists")
+}
+
+model Pharmacist {
+  id               String    @id @default(uuid())
+  storeId          String
+  store            Store     @relation(fields: [storeId], references: [id])
+  userId           String? // if the pharmacist logs in as a PartnerMember
+  user             User?     @relation(fields: [userId], references: [id])
+  name             String
+  registrationNo   String
+  stateCouncil     String
+  certificateDocId String?
+  isActive         Boolean   @default(true)
+  consentAt        DateTime? // "prescriptions will be verified before dispatch"
+  createdAt        DateTime  @default(now())
+
+  shifts  PharmacistShift[]
+  reviews Prescription[]    @relation("pharmacistReviewer")
+
+  @@unique([registrationNo, stateCouncil])
+  @@map("pharmacists")
+}
+
+model PharmacistShift {
+  id           String     @id @default(uuid())
+  pharmacistId String
+  pharmacist   Pharmacist @relation(fields: [pharmacistId], references: [id], onDelete: Cascade)
+  dayOfWeek    Int
+  startsAt     String
+  endsAt       String
+
+  @@map("pharmacist_shifts")
+}
+
+// ---------------------------------------------------------------------
+// 4. LEGAL & CONSENT (click-wrap, audit-ready)
+// ---------------------------------------------------------------------
+
+enum LegalDocType {
+  PARTNER_TNC
+  SLA_TERMS
+  STATE_RIDER
+  PENALTY_FRAMEWORK
+  CUSTOMER_TNC
+  PRIVACY_POLICY
+  RX_DECLARATION
+  WHATSAPP_OPT_IN
+}
+
+model LegalDocumentVersion {
+  id            String       @id @default(uuid())
+  type          LegalDocType
+  version       String // "2026.10"
+  state         String? // for STATE_RIDER
+  vertical      Vertical?
+  contentUrl    String
+  contentHash   String
+  effectiveFrom DateTime
+  isActive      Boolean      @default(true)
+
+  consents ConsentRecord[]
+
+  @@unique([type, version, state, vertical])
+  @@map("legal_document_versions")
+}
+
+model ConsentRecord {
+  id         String               @id @default(uuid())
+  userId     String
+  user       User                 @relation(fields: [userId], references: [id])
+  legalDocId String
+  legalDoc   LegalDocumentVersion @relation(fields: [legalDocId], references: [id])
+  storeId    String?
+  orderId    String?
+  channel    OnboardingChannel
+  ip         String?
+  userAgent  String?
+  acceptedAt DateTime             @default(now())
+
+  @@index([userId, legalDocId])
+  @@index([orderId])
+  @@map("consent_records")
+}
+
+// ---------------------------------------------------------------------
+// 5. CATALOG & INVENTORY
+// ---------------------------------------------------------------------
+
+model Category {
+  id        String    @id @default(uuid())
+  storeId   String
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name      String
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  products  Product[]
+
+  @@unique([storeId, name])
+  @@map("categories")
+}
+
+enum DrugSchedule {
+  NONE
+  OTC
+  H
+  H1
+  X
+}
+
+model Product {
+  id             String    @id @default(uuid())
+  storeId        String
+  store          Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  categoryId     String?
+  category       Category? @relation(fields: [categoryId], references: [id])
+  name           String
+  description    String?
+  images         String[]
+  sku            String?
+  barcode        String?
+  unit           String    @default("piece") // piece | kg | g | litre | ml | pack | plate
+  unitSize       Float?
+  price          Int // paise, selling price
+  mrp            Int? // paise
+  taxRatePct     Float     @default(0)
+  hsnCode        String?
+  isAvailable    Boolean   @default(true)
+  pausedUntil    DateTime? // menu auto-pause
+  isComplex      Boolean   @default(false) // candidate for auto-pause under load
+  prepMinutes    Int? // item-level override
+  maxQtyPerOrder Int?
+  sortOrder      Int       @default(0)
+
+  // EAT
+  isVeg      Boolean?
+  spiceLevel Int?
+
+  // PHARMACY
+  prescriptionRequired Boolean      @default(false)
+  drugSchedule         DrugSchedule @default(NONE)
+  saltComposition      String?
+  manufacturer         String?
+  substitutionAllowed  Boolean      @default(false)
+
+  // DIAGNOSTICS (lab tests & packages) — prescriptionRequired above also applies
+  labSampleType     String? // BLOOD | URINE | STOOL | SWAB | SALIVA | OTHER
+  labFastingHours   Int? // 0 = no fasting
+  labReportHours    Int? // turnaround time
+  labHomeCollection Boolean?
+  labWalkIn         Boolean?
+  labParameters     Int? // tests included in a package
+  labPreparation    String? // instructions shown before booking
+
+  tags      String[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  variants    ProductVariant[]
+  addonGroups ProductAddonGroup[]
+  inventory   Inventory?
+  orderItems  OrderItem[]
+  labItems    LabBookingItem[]
+  cartItems   CartItem[]
+  rxItems     PrescriptionItem[]
+  waSync      WhatsAppCatalogSync?
+
+  @@index([storeId, isAvailable, categoryId])
+  @@index([name])
+  @@map("products")
+}
+
+model ProductVariant {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String // "Half", "Full", "500 g"
+  priceDiff Int     @default(0) // paise
+  isDefault Boolean @default(false)
+
+  @@map("product_variants")
+}
+
+model ProductAddonGroup {
+  id        String         @id @default(uuid())
+  productId String
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String // "Choose bread", "Extras"
+  minSelect Int            @default(0)
+  maxSelect Int            @default(1)
+  addons    ProductAddon[]
+
+  @@map("product_addon_groups")
+}
+
+model ProductAddon {
+  id      String            @id @default(uuid())
+  groupId String
+  group   ProductAddonGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name    String
+  price   Int               @default(0)
+  isVeg   Boolean?
+
+  @@map("product_addons")
+}
+
+model Inventory {
+  id                String    @id @default(uuid())
+  productId         String    @unique
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  trackStock        Boolean   @default(true)
+  stockQty          Int       @default(0)
+  reservedQty       Int       @default(0) // held by PLACED/ACCEPTED orders
+  lowStockThreshold Int       @default(5)
+  batchNo           String?
+  expiryDate        DateTime? @db.Date // pharmacy / perishables
+  updatedAt         DateTime  @updatedAt
+
+  movements InventoryMovement[]
+
+  @@map("inventory")
+}
+
+enum InventoryMovementType {
+  PURCHASE
+  SALE
+  RESERVE
+  RELEASE
+  ADJUSTMENT
+  EXPIRY_WRITEOFF
+  RETURN
+}
+
+model InventoryMovement {
+  id          String                @id @default(uuid())
+  inventoryId String
+  inventory   Inventory             @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  type        InventoryMovementType
+  qtyDelta    Int
+  orderId     String?
+  note        String?
+  actorUserId String?
+  createdAt   DateTime              @default(now())
+
+  @@index([inventoryId, createdAt])
+  @@map("inventory_movements")
+}
+
+// ---------------------------------------------------------------------
+// 6. CUSTOMERS, ADDRESSES, CARTS  (Delivez Local app)
+// ---------------------------------------------------------------------
+
+model Customer {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id])
+  defaultAddressId String?
+  referralCode     String?  @unique
+  marketingOptIn   Boolean  @default(false)
+  whatsappOptIn    Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  carts         Cart[]
+  labBookings   LabBooking[]
+  orders        Order[]
+  prescriptions Prescription[]
+  reviews       Review[]
+  redemptions   CouponRedemption[]
+
+  @@map("customers")
+}
+
+enum AddressLabel {
+  HOME
+  WORK
+  OTHER
+}
+
+model Address {
+  id           String       @id @default(uuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label        AddressLabel @default(HOME)
+  contactName  String?
+  contactPhone String?
+  line1        String
+  line2        String?
+  landmark     String?
+  pincode      String
+  cityName     String
+  state        String
+  lat          Float
+  lng          Float
+  placeId      String? // Google Places ID
+  isDefault    Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  deletedAt    DateTime?
+
+  orders Order[]
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+model Cart {
+  id             String     @id @default(uuid())
+  customerId     String
+  customer       Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  storeId        String
+  store          Store      @relation(fields: [storeId], references: [id])
+  prescriptionId String?
+  couponCode     String?
+  updatedAt      DateTime   @updatedAt
+  items          CartItem[]
+
+  @@unique([customerId, storeId])
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  variantId String?
+  addonIds  String[]
+  qty       Int
+  isRx      Boolean  @default(false)
+  rxItemId  String?
+
+  @@unique([cartId, productId, variantId])
+  @@map("cart_items")
+}
+
+// ---------------------------------------------------------------------
+// 7. PRESCRIPTIONS (pharmacy vertical — pharmacist-in-the-loop)
+// ---------------------------------------------------------------------
+
+enum PrescriptionStatus {
+  UPLOADED
+  AI_PRECHECK
+  UNDER_REVIEW
+  CLARIFICATION_NEEDED
+  APPROVED
+  REJECTED
+  EXPIRED
+  CONSUMED // fully used by orders (non-refillable)
+}
+
+model Prescription {
+  id              String             @id @default(uuid())
+  customerId      String
+  customer        Customer           @relation(fields: [customerId], references: [id])
+  storeId         String? // pharmacy that reviewed it
+  store           Store?             @relation(fields: [storeId], references: [id])
+  fileUrls        String[]
+  fileHash        String // SHA-256 of concatenated files — audit anchor
+  status          PrescriptionStatus @default(UPLOADED)
+  doctorName      String?
+  doctorRegNo     String?
+  patientName     String?
+  issuedOn        DateTime?          @db.Date
+  validUntil      DateTime?          @db.Date
+  aiPrecheck      Json? // {readable:true, hasDate:true, hasDoctor:true, flags:[]}
+  reviewedById    String?
+  reviewedBy      Pharmacist?        @relation("pharmacistReviewer", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  reviewNotes     String?
+  rejectionReason String?
+  refillsAllowed  Int                @default(0)
+  refillsUsed     Int                @default(0)
+  createdAt       DateTime           @default(now())
+
+  items  PrescriptionItem[]
+  labBookings LabBooking[]
+  orders Order[]
+
+  @@index([customerId, status])
+  @@index([storeId, status])
+  @@map("prescriptions")
+}
+
+model PrescriptionItem {
+  id                       String       @id @default(uuid())
+  prescriptionId           String
+  prescription             Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicineName             String // as written
+  dosage                   String?
+  productId                String? // mapped by pharmacist to store product
+  product                  Product?     @relation(fields: [productId], references: [id])
+  allowedQty               Int
+  substitutedWithProductId String?
+  isApproved               Boolean      @default(false)
+  note                     String?
+
+  @@map("prescription_items")
+}
+
+// ---------------------------------------------------------------------
+// 8. ORDERS & PAYMENTS
+// ---------------------------------------------------------------------
+
+enum FulfilmentType {
+  DELIVERY
+  PICKUP
+}
+
+enum OrderChannel {
+  LOCAL_APP
+  LOCAL_WEB
+  WHATSAPP
+  PARTNER_MANUAL // store-created (walk-in/phone order needing delivery)
+  ADMIN
+}
+
+enum OrderStatus {
+  DRAFT // cart converted, awaiting payment
+  AWAITING_RX_REVIEW // pharmacy: waiting pharmacist approval
+  PLACED // paid/COD confirmed, waiting store acceptance (store sees "New")
+  ACCEPTED
+  PREPARING
+  READY_SOON
+  READY // packed & sealed; rider notified / customer notified for pickup
+  PICKED_UP // handed to rider (DELIVERY) or to customer (PICKUP → COMPLETED)
+  OUT_FOR_DELIVERY
+  ARRIVED
+  DELIVERED
+  COMPLETED
+  REJECTED // by store
+  CANCELLED // by customer / admin / system
+  DELIVERY_FAILED
+  REFUNDED
+}
+
+enum PaymentMode {
+  UPI
+  CARD
+  NETBANKING
+  WALLET
+  COD
+  UPI_LINK // WhatsApp orders
+}
+
+enum PaymentStatus {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUND_PENDING
+  REFUNDED
+  COD_PENDING
+  COD_COLLECTED
+}
+
+enum SlotType {
+  INSTANT
+  SCHEDULED
+}
+
+model Order {
+  id             String         @id @default(uuid())
+  orderNumber    String         @unique // DEL-83421
+  customerId     String
+  customer       Customer       @relation(fields: [customerId], references: [id])
+  storeId        String
+  store          Store          @relation(fields: [storeId], references: [id])
+  vertical       Vertical
+  channel        OrderChannel
+  fulfilmentType FulfilmentType
+  status         OrderStatus    @default(DRAFT)
+  slotType       SlotType       @default(INSTANT)
+  scheduledFor   DateTime?
+
+  // address snapshot (immutable even if customer edits the address later)
+  addressId          String?
+  address            Address? @relation(fields: [addressId], references: [id])
+  deliveryAddress    Json? // {line1, line2, landmark, pincode, lat, lng, contactName, contactPhone}
+  deliveryDistanceKm Float?
+
+  // money (paise)
+  itemsSubtotal  Int
+  discountAmount Int           @default(0)
+  couponCode     String?
+  deliveryFee    Int           @default(0)
+  packagingFee   Int           @default(0)
+  handlingFee    Int           @default(0)
+  taxAmount      Int           @default(0)
+  tipAmount      Int           @default(0)
+  grandTotal     Int
+  paymentMode    PaymentMode
+  paymentStatus  PaymentStatus @default(PENDING)
+
+  // pharmacy
+  prescriptionId         String?
+  prescription           Prescription? @relation(fields: [prescriptionId], references: [id])
+  rxDeclarationConsentId String?
+
+  // SLA / prep
+  promisedPrepMinutes Int? // what store committed on accept
+  aiPrepMinutes       Int?
+  aiConfidence        Float?
+  promisedDeliveryAt  DateTime? // customer-facing ETA at placement
+  currentEtaAt        DateTime? // live, re-computed
+
+  // timestamps of the lifecycle
+  placedAt           DateTime?
+  acceptedAt         DateTime?
+  preparingAt        DateTime?
+  readySoonAt        DateTime?
+  readySoonWindowMin Int?
+  readyAt            DateTime?
+  pickedUpAt         DateTime?
+  deliveredAt        DateTime?
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  cancelledBy        String? // CUSTOMER | STORE | ADMIN | SYSTEM
+  cancelReason       String?
+  rejectReason       String?
+
+  // security
+  handoverOtp String? // rider ↔ store (also encoded as QR)
+  deliveryOtp String? // rider ↔ customer
+  pickupOtp   String? // customer self-pickup
+
+  customerNote String?
+  isPriority   Boolean @default(false)
+  isTestOrder  Boolean @default(false)
+  batchId      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items            OrderItem[]
+  statusEvents     OrderStatusEvent[]
+  payments         Payment[]
+  refunds          Refund[]
+  deliveryTask     DeliveryTask?
+  slaRecords       SlaRecord[]
+  incidents        Incident[]
+  penalties        Penalty[]
+  slaSaves         SlaSave[]
+  review           Review?
+  settlementLines  SettlementLine[]
+  tickets          SupportTicket[]
+  aiPredictions    AiPrediction[]
+  couponRedemption CouponRedemption?
+
+  @@index([storeId, status, createdAt])
+  @@index([customerId, createdAt])
+  @@index([status, currentEtaAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                   String  @id @default(uuid())
+  orderId              String
+  order                Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId            String
+  product              Product @relation(fields: [productId], references: [id])
+  productName          String // snapshot
+  variantName          String?
+  addons               Json? // [{name, price}]
+  unitPrice            Int // paise snapshot
+  qty                  Int
+  taxRatePct           Float   @default(0)
+  lineTotal            Int
+  isRx                 Boolean @default(false)
+  rxItemId             String?
+  substitutedProductId String?
+  isOutOfStock         Boolean @default(false) // store marked unavailable during acceptance
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model OrderStatusEvent {
+  id        String       @id @default(uuid())
+  orderId   String
+  order     Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromState OrderStatus?
+  toState   OrderStatus
+  actorType String // CUSTOMER | PARTNER | RIDER | ADMIN | SYSTEM | AI
+  actorId   String?
+  reason    String?
+  meta      Json?
+  createdAt DateTime     @default(now())
+
+  @@index([orderId, createdAt])
+  @@map("order_status_events")
+}
+
+enum PaymentProvider {
+  RAZORPAY
+  COD
+  UPI_LINK
+}
+
+model Payment {
+  id                String          @id @default(uuid())
+  orderId           String
+  order             Order           @relation(fields: [orderId], references: [id])
+  provider          PaymentProvider
+  providerOrderId   String?
+  providerPaymentId String?         @unique
+  amount            Int
+  currency          String          @default("INR")
+  method            PaymentMode
+  status            PaymentStatus
+  paymentLinkUrl    String? // WhatsApp UPI link
+  capturedAt        DateTime?
+  failureReason     String?
+  rawPayload        Json?
+  createdAt         DateTime        @default(now())
+
+  refunds Refund[]
+
+  @@index([orderId])
+  @@map("payments")
+}
+
+enum RefundStatus {
+  INITIATED
+  PROCESSED
+  FAILED
+}
+
+model Refund {
+  id               String       @id @default(uuid())
+  orderId          String
+  order            Order        @relation(fields: [orderId], references: [id])
+  paymentId        String?
+  payment          Payment?     @relation(fields: [paymentId], references: [id])
+  amount           Int
+  reason           String
+  status           RefundStatus @default(INITIATED)
+  providerRefundId String?
+  initiatedBy      String // ADMIN | SYSTEM | STORE
+  createdAt        DateTime     @default(now())
+  processedAt      DateTime?
+
+  @@map("refunds")
+}
+
+model Coupon {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  description   String?
+  discountType  String // FLAT | PERCENT | FREE_DELIVERY
+  discountValue Int
+  maxDiscount   Int?
+  minOrder      Int       @default(0)
+  vertical      Vertical?
+  storeId       String? // store-funded promotion
+  fundedBy      String    @default("PLATFORM") // PLATFORM | STORE
+  usageLimit    Int?
+  perUserLimit  Int       @default(1)
+  startsAt      DateTime
+  endsAt        DateTime
+  isActive      Boolean   @default(true)
+
+  redemptions CouponRedemption[]
+
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id         String   @id @default(uuid())
+  couponId   String
+  coupon     Coupon   @relation(fields: [couponId], references: [id])
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  orderId    String   @unique
+  order      Order    @relation(fields: [orderId], references: [id])
+  amount     Int
+  createdAt  DateTime @default(now())
+
+  @@map("coupon_redemptions")
+}
+
+// ---------------------------------------------------------------------
+// 9. DELIVERY / DISPATCH  (rider-ready contract; Rider app plugs in here)
+// ---------------------------------------------------------------------
+
+enum DeliverySource {
+  LOCAL // Delivez Local store orders
+  ONE // Delivez One courier / parcel bookings (same rider fleet)
+}
+
+enum DeliveryTaskStatus {
+  CREATED
+  SEARCHING_RIDER
+  ASSIGNED
+  EN_ROUTE_TO_PICKUP
+  ARRIVED_AT_PICKUP
+  WAITING_AT_PICKUP
+  PICKED_UP
+  EN_ROUTE_TO_DROP
+  ARRIVED_AT_DROP
+  DELIVERED
+  FAILED
+  CANCELLED
+  RETURNED_TO_STORE
+}
+
+model DeliveryTask {
+  id              String             @id @default(uuid())
+  source          DeliverySource     @default(LOCAL)
+  orderId         String?            @unique
+  order           Order?             @relation(fields: [orderId], references: [id])
+  externalRef     String? // Delivez One booking id
+  status          DeliveryTaskStatus @default(CREATED)
+  riderId         String?
+  rider           Rider?             @relation(fields: [riderId], references: [id])
+  batchId         String?
+  batch           DeliveryBatch?     @relation(fields: [batchId], references: [id])
+  sequenceInBatch Int?
+
+  pickupLat          Float
+  pickupLng          Float
+  pickupAddress      Json
+  pickupContactPhone String
+  dropLat            Float
+  dropLng            Float
+  dropAddress        Json
+  dropContactPhone   String
+  distanceKm         Float?
+  readyAtEstimate    DateTime? // from store prep (READY_SOON updates this)
+
+  etaToPickupMin     Int?
+  etaToDropMin       Int?
+  searchStartedAt    DateTime?
+  assignedAt         DateTime?
+  arrivedPickupAt    DateTime?
+  waitingStartedAt   DateTime?
+  waitingFreeMinutes Int       @default(10)
+  waitingBilledMin   Int       @default(0)
+  pickedUpAt         DateTime?
+  arrivedDropAt      DateTime?
+  deliveredAt        DateTime?
+  failedReason       String?
+
+  handoverVerifiedBy String? // OTP | QR | MANUAL
+  proofType          String? // OTP | PHOTO | SIGNATURE
+  proofUrl           String?
+  riderEarning       Int? // paise
+  codToCollect       Int     @default(0)
+  codCollected       Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events DeliveryTaskEvent[]
+
+  @@index([status, riderId])
+  @@index([source, externalRef])
+  @@map("delivery_tasks")
+}
+
+model DeliveryTaskEvent {
+  id        String              @id @default(uuid())
+  taskId    String
+  task      DeliveryTask        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromState DeliveryTaskStatus?
+  toState   DeliveryTaskStatus
+  lat       Float?
+  lng       Float?
+  actorType String // RIDER | SYSTEM | ADMIN | STORE
+  meta      Json?
+  createdAt DateTime            @default(now())
+
+  @@index([taskId, createdAt])
+  @@map("delivery_task_events")
+}
+
+model DeliveryBatch {
+  id        String         @id @default(uuid())
+  riderId   String?
+  rider     Rider?         @relation(fields: [riderId], references: [id])
+  status    String         @default("OPEN") // OPEN | IN_PROGRESS | COMPLETED
+  createdAt DateTime       @default(now())
+  tasks     DeliveryTask[]
+
+  @@map("delivery_batches")
+}
+
+// Minimal rider entity now; the Rider project extends it (vehicles, shifts,
+// KYC, earnings, zones). Keep the id stable — DeliveryTask.riderId depends on it.
+enum RiderStatus {
+  ONBOARDING
+  ACTIVE
+  OFFLINE
+  SUSPENDED
+}
+
+model Rider {
+  id          String      @id @default(uuid())
+  userId      String      @unique
+  user        User        @relation(fields: [userId], references: [id])
+  riderCode   String      @unique // DZR-00421
+  status      RiderStatus @default(ONBOARDING)
+  vehicleType String? // BIKE | SCOOTER | BICYCLE | EV
+  cityId      String?
+  isOnline    Boolean     @default(false)
+  lastLat     Float?
+  lastLng     Float?
+  lastSeenAt  DateTime?
+  avgRating   Float       @default(0)
+  createdAt   DateTime    @default(now())
+
+  tasks   DeliveryTask[]
+  batches DeliveryBatch[]
+
+  @@index([cityId, isOnline])
+  @@map("riders")
+}
+
+// ---------------------------------------------------------------------
+// 10. SLA, INCIDENTS, PENALTIES, ADMIN CONTROL
+// ---------------------------------------------------------------------
+
+enum SlaType {
+  PREP
+  PICKUP
+  DELIVERY
+}
+
+enum SlaStatus {
+  WITHIN
+  SOFT_BREACH // 4–7 min
+  HARD_BREACH // > 7 min
+}
+
+model SlaRecord {
+  id            String    @id @default(uuid())
+  orderId       String
+  order         Order     @relation(fields: [orderId], references: [id])
+  storeId       String
+  store         Store     @relation(fields: [storeId], references: [id])
+  slaType       SlaType
+  promisedAt    DateTime
+  actualAt      DateTime?
+  breachMinutes Int       @default(0)
+  status        SlaStatus @default(WITHIN)
+  createdAt     DateTime  @default(now())
+
+  @@unique([orderId, slaType])
+  @@index([storeId, slaType, status, createdAt])
+  @@map("sla_records")
+}
+
+enum IncidentType {
+  I01_KITCHEN_DELAY
+  I02_ORDER_NOT_READY
+  I03_RIDER_LATE
+  I04_RIDER_WAITED_TOO_LONG
+  I05_INCORRECT_ETA
+  I06_FORCE_MAJEURE
+  I07_ADMIN_OVERRIDE_DELAY
+  I08_CUSTOMER_UNRESPONSIVE
+  I09_READY_SOON_EXPIRED
+  I10_ITEM_UNAVAILABLE
+}
+
+enum LiableParty {
+  STORE
+  PLATFORM
+  RIDER
+  CUSTOMER
+  NONE
+}
+
+model Incident {
+  id          String       @id @default(uuid())
+  orderId     String
+  order       Order        @relation(fields: [orderId], references: [id])
+  storeId     String
+  store       Store        @relation(fields: [storeId], references: [id])
+  cityId      String
+  city        City         @relation(fields: [cityId], references: [id])
+  type        IncidentType
+  detectedBy  String // AI | ADMIN | RIDER | SYSTEM | STORE
+  confidence  Float        @default(1) // 0..1
+  liableParty LiableParty
+  detectedAt  DateTime     @default(now())
+  notes       String?
+  evidence    Json?
+
+  @@index([storeId, detectedAt])
+  @@map("incidents")
+}
+
+enum PenaltyStatus {
+  PROPOSED
+  APPLIED
+  WAIVED
+  DISPUTED
+  REVERSED
+}
+
+model Penalty {
+  id               String        @id @default(uuid())
+  orderId          String
+  order            Order         @relation(fields: [orderId], references: [id])
+  storeId          String
+  store            Store         @relation(fields: [storeId], references: [id])
+  ruleCode         String // HARD_FIRST | HARD_REPEAT_SAME_DAY | CHRONIC
+  amount           Int // paise (₹50 = 5000)
+  liableParty      LiableParty
+  status           PenaltyStatus @default(PROPOSED)
+  reason           String // plain-English explanation shown to the partner
+  evidence         Json // {slaRecordId, incidentIds[], breachMinutes, confidence}
+  dailyCapApplied  Boolean       @default(false)
+  proposedAt       DateTime      @default(now())
+  appliedAt        DateTime?
+  waivedAt         DateTime?
+  waivedByAdminId  String?
+  waiverReason     String?
+  settlementLineId String?
+
+  dispute PenaltyDispute?
+
+  @@index([storeId, status, proposedAt])
+  @@map("penalties")
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+}
+
+model PenaltyDispute {
+  id                String        @id @default(uuid())
+  penaltyId         String        @unique
+  penalty           Penalty       @relation(fields: [penaltyId], references: [id])
+  raisedByUserId    String
+  reason            String
+  attachments       String[]
+  status            DisputeStatus @default(OPEN)
+  resolvedByAdminId String?
+  resolution        String?
+  createdAt         DateTime      @default(now())
+  resolvedAt        DateTime?
+
+  @@map("penalty_disputes")
+}
+
+model SlaSave {
+  id           String   @id @default(uuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id])
+  savedMinutes Int
+  savedBy      String // AI | ADMIN | STORE
+  action       String // ETA_EXTENDED | PRIORITY_RIDER | ALERT_ACTED
+  createdAt    DateTime @default(now())
+
+  @@map("sla_saves")
+}
+
+enum AdminActionType {
+  SEND_WARNING
+  SUGGEST_ETA_INCREASE
+  ASSIGN_PRIORITY_RIDER
+  THROTTLE_ORDERS
+  PAUSE_NEW_ORDERS
+  RESUME_ORDERS
+  DISABLE_COMPLEX_ITEMS
+  FORCE_ETA_OVERRIDE
+  APPROVE_STORE
+  REJECT_STORE
+  SUSPEND_STORE
+  WAIVE_PENALTY
+  CALL_STORE
+}
+
+model AdminAction {
+  id            String          @id @default(uuid())
+  adminId       String
+  admin         AdminUser       @relation(fields: [adminId], references: [id])
+  storeId       String?
+  store         Store?          @relation(fields: [storeId], references: [id])
+  orderId       String?
+  type          AdminActionType
+  params        Json?
+  impactPreview Json? // {ordersBlocked: 12}
+  reason        String?
+  createdAt     DateTime        @default(now())
+
+  @@index([storeId, createdAt])
+  @@map("admin_actions")
+}
+
+model StoreThrottle {
+  id                 String   @id @default(uuid())
+  storeId            String
+  store              Store    @relation(fields: [storeId], references: [id])
+  maxOrdersPerMin    Int?
+  pauseNewOrders     Boolean  @default(false)
+  disabledProductIds String[]
+  startsAt           DateTime @default(now())
+  endsAt             DateTime
+  createdByAdminId   String?
+
+  @@index([storeId, endsAt])
+  @@map("store_throttles")
+}
+
+// AI layer (phase 6). Stored from day one so replays are possible later.
+model AiPrediction {
+  id           String   @id @default(uuid())
+  storeId      String
+  store        Store    @relation(fields: [storeId], references: [id])
+  orderId      String?
+  order        Order?   @relation(fields: [orderId], references: [id])
+  type         String // PREP_TIME | SLA_RISK | CANCEL_RISK | READINESS
+  value        Float
+  confidence   Float
+  riskLevel    String? // SAFE | MEDIUM | HIGH
+  features     Json
+  explanation  String[] // ["3 items", "Similar orders avg: 21 mins", ...]
+  modelVersion String
+  actualValue  Float? // back-filled for accuracy scoring
+  createdAt    DateTime @default(now())
+
+  @@index([storeId, type, createdAt])
+  @@map("ai_predictions")
+}
+
+// ---------------------------------------------------------------------
+// 11. FINANCE — LEDGER & SETTLEMENTS
+// ---------------------------------------------------------------------
+
+enum LedgerEntryType {
+  SALE
+  COMMISSION
+  PENALTY
+  PENALTY_REVERSAL
+  REFUND
+  ADJUSTMENT
+  PAYOUT
+  COD_COLLECTED
+  PROMO_FUNDED
+}
+
+model LedgerEntry {
+  id           String          @id @default(uuid())
+  storeId      String
+  store        Store           @relation(fields: [storeId], references: [id])
+  orderId      String?
+  type         LedgerEntryType
+  amount       Int // signed paise; +credit to store, -debit
+  balanceAfter Int
+  reference    String?
+  note         String?
+  createdAt    DateTime        @default(now())
+
+  @@index([storeId, createdAt])
+  @@map("ledger_entries")
+}
+
+enum SettlementStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  PAID
+  FAILED
+  ON_HOLD
+}
+
+model Settlement {
+  id            String           @id @default(uuid())
+  storeId       String
+  store         Store            @relation(fields: [storeId], references: [id])
+  bankAccountId String?
+  bankAccount   BankAccount?     @relation(fields: [bankAccountId], references: [id])
+  periodStart   DateTime         @db.Date
+  periodEnd     DateTime         @db.Date
+  grossSales    Int
+  commission    Int
+  penalties     Int
+  refunds       Int
+  adjustments   Int
+  codCollected  Int // deducted (store already has the cash) when rider collected COD
+  netPayable    Int
+  status        SettlementStatus @default(PENDING)
+  approvedById  String?
+  approvedBy    AdminUser?       @relation("settlementApprover", fields: [approvedById], references: [id])
+  utr           String?
+  paidAt        DateTime?
+  failureReason String?
+  statementUrl  String?
+  createdAt     DateTime         @default(now())
+
+  lines SettlementLine[]
+
+  @@unique([storeId, periodStart, periodEnd])
+  @@map("settlements")
+}
+
+model SettlementLine {
+  id           String          @id @default(uuid())
+  settlementId String
+  settlement   Settlement      @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  orderId      String?
+  order        Order?          @relation(fields: [orderId], references: [id])
+  type         LedgerEntryType
+  amount       Int
+  description  String?
+
+  @@index([settlementId])
+  @@map("settlement_lines")
+}
+
+// ---------------------------------------------------------------------
+// 12. REVIEWS, SUPPORT, NOTIFICATIONS, WHATSAPP, AUDIT, STATS
+// ---------------------------------------------------------------------
+
+model Review {
+  id         String    @id @default(uuid())
+  orderId    String    @unique
+  order      Order     @relation(fields: [orderId], references: [id])
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id])
+  storeId    String
+  store      Store     @relation(fields: [storeId], references: [id])
+  rating     Int // 1..5
+  comment    String?
+  tags       String[] // "Packaging", "Late", "Wrong item"
+  reply      String?
+  repliedAt  DateTime?
+  isHidden   Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  @@index([storeId, createdAt])
+  @@map("reviews")
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_USER
+  RESOLVED
+  CLOSED
+}
+
+model SupportTicket {
+  id              String       @id @default(uuid())
+  raisedByUserId  String
+  raisedBy        User         @relation(fields: [raisedByUserId], references: [id])
+  raisedByType    String // CUSTOMER | PARTNER | RIDER
+  orderId         String?
+  order           Order?       @relation(fields: [orderId], references: [id])
+  category        String // ORDER_ISSUE | MEDICINE_MISMATCH | PAYOUT | PENALTY | TECH | OTHER
+  subject         String
+  status          TicketStatus @default(OPEN)
+  priority        String       @default("NORMAL")
+  assignedAdminId String?
+  createdAt       DateTime     @default(now())
+  resolvedAt      DateTime?
+
+  messages TicketMessage[]
+
+  @@index([status, priority])
+  @@map("support_tickets")
+}
+
+model TicketMessage {
+  id           String        @id @default(uuid())
+  ticketId     String
+  ticket       SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderUserId String
+  sender       User          @relation(fields: [senderUserId], references: [id])
+  body         String
+  attachments  String[]
+  createdAt    DateTime      @default(now())
+
+  @@map("ticket_messages")
+}
+
+enum NotificationChannel {
+  PUSH
+  SMS
+  WHATSAPP
+  EMAIL
+  IN_APP
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+/// Every SMS / WhatsApp message handed to a provider (Step 12). In dev the "DEV" provider only records it here.
+model MessageLog {
+  id            String              @id @default(uuid())
+  channel       NotificationChannel
+  toPhone       String
+  userId        String?
+  templateCode  String
+  body          String
+  provider      String // DEV | MSG91
+  status        String // DELIVERED_DEV | ACCEPTED (by the gateway) | FAILED
+  providerMsgId String?
+  error         String?
+  createdAt     DateTime            @default(now())
+
+  @@index([toPhone, createdAt])
+  @@index([createdAt])
+  @@map("message_logs")
+}
+
+model Notification {
+  id            String              @id @default(uuid())
+  userId        String
+  user          User                @relation(fields: [userId], references: [id])
+  app           AppId
+  channel       NotificationChannel
+  templateCode  String // ORDER_PLACED, RX_APPROVED, RIDER_ARRIVED, PAYOUT_PAID ...
+  title         String?
+  body          String
+  data          Json?
+  status        NotificationStatus  @default(QUEUED)
+  providerMsgId String?
+  sentAt        DateTime?
+  readAt        DateTime?
+  createdAt     DateTime            @default(now())
+
+  @@index([userId, app, createdAt])
+  @@map("notifications")
+}
+
+enum WaContextType {
+  PARTNER_ONBOARDING
+  CUSTOMER_ORDERING
+  SUPPORT
+  NOTIFICATION
+}
+
+model WhatsAppConversation {
+  id              String        @id @default(uuid())
+  phone           String
+  contextType     WaContextType
+  storeId         String?
+  store           Store?        @relation(fields: [storeId], references: [id])
+  userId          String?
+  state           String // state-machine node, e.g. "ELIGIBILITY", "LOCATION", "DOCS"
+  stateData       Json // collected answers
+  language        Language      @default(EN)
+  humanTakeover   Boolean       @default(false)
+  assignedAdminId String?
+  lastInboundAt   DateTime?
+  lastOutboundAt  DateTime?
+  expiresAt       DateTime? // 24h customer-service window
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  messages WhatsAppMessage[]
+
+  @@index([phone, contextType])
+  @@map("whatsapp_conversations")
+}
+
+model WhatsAppMessage {
+  id             String               @id @default(uuid())
+  conversationId String
+  conversation   WhatsAppConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  direction      String // IN | OUT
+  waMessageId    String?              @unique
+  type           String // text | interactive | image | document | location | order | template
+  templateName   String?
+  body           String?
+  payload        Json?
+  status         String? // sent | delivered | read | failed
+  createdAt      DateTime             @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("whatsapp_messages")
+}
+
+model WhatsAppCatalogSync {
+  id            String    @id @default(uuid())
+  productId     String    @unique
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  storeId       String
+  store         Store     @relation(fields: [storeId], references: [id])
+  metaCatalogId String
+  metaProductId String? // retailer_id in Meta catalog
+  lastSyncedAt  DateTime?
+  syncStatus    String    @default("PENDING") // PENDING | SYNCED | FAILED
+  lastError     String?
+
+  @@map("whatsapp_catalog_sync")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?
+  actor       User?    @relation("actor", fields: [actorUserId], references: [id])
+  actorType   String // USER | ADMIN | SYSTEM | AI
+  entity      String // "Store", "Order", "Penalty" ...
+  entityId    String
+  action      String // CREATE | UPDATE | STATUS_CHANGE | DELETE | LOGIN
+  before      Json?
+  after       Json?
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  @@index([entity, entityId, createdAt])
+  @@map("audit_logs")
+}
+
+model StoreDailyStat {
+  id              String   @id @default(uuid())
+  storeId         String
+  store           Store    @relation(fields: [storeId], references: [id])
+  date            DateTime @db.Date
+  ordersPlaced    Int      @default(0)
+  ordersCompleted Int      @default(0)
+  ordersCancelled Int      @default(0)
+  ordersRejected  Int      @default(0)
+  grossSales      Int      @default(0)
+  avgPrepMinutes  Float?
+  onTimePct       Float?
+  slaBreaches     Int      @default(0)
+  penaltiesAmount Int      @default(0)
+  avgRating       Float?
+
+  @@unique([storeId, date])
+  @@map("store_daily_stats")
+}
+
+// ---------------------------------------------------------------------
+// LAB BOOKINGS (Diagnostics — Step 9b)
+// Booked → [Rx review] → Confirmed → [Collector assigned] → Sample collected → Processing → Report ready
+// ---------------------------------------------------------------------
+
+enum LabBookingStatus {
+  BOOKED // paid, waiting for the lab to confirm
+  RX_REVIEW // a test needs a doctor's prescription — lab reviews it first
+  CONFIRMED
+  COLLECTOR_ASSIGNED // home collection: phlebotomist assigned
+  SAMPLE_COLLECTED
+  PROCESSING
+  REPORT_READY
+  CANCELLED // by customer / admin
+  REJECTED // by the lab (incl. prescription rejected)
+}
+
+enum LabCollectionType {
+  HOME
+  WALK_IN
+}
+
+model LabBooking {
+  id             String            @id @default(uuid())
+  bookingNumber  String            @unique // LAB-483021
+  customerId     String
+  customer       Customer          @relation(fields: [customerId], references: [id])
+  storeId        String
+  store          Store             @relation(fields: [storeId], references: [id])
+  channel        OrderChannel
+  status         LabBookingStatus  @default(BOOKED)
+  collectionType LabCollectionType
+  slotStart      DateTime
+  slotMinutes    Int               @default(60)
+
+  patientName   String
+  patientAge    Int?
+  patientGender String? // F | M | O
+  address       Json? // home collection snapshot {line1, landmark, pincode, lat, lng}
+  distanceKm    Float?
+
+  itemsSubtotal Int
+  collectionFee Int           @default(0)
+  grandTotal    Int
+  paymentMode   PaymentMode
+  paymentStatus PaymentStatus @default(PENDING)
+  refundAmount  Int           @default(0)
+
+  rxRequired     Boolean       @default(false)
+  prescriptionId String?
+  prescription   Prescription? @relation(fields: [prescriptionId], references: [id])
+  rxSeenByStore  Boolean       @default(false) // store-created bookings: staff confirmed they saw the prescription
+
+  collectionOtp       String // shown to the customer; collector/desk checks it
+  collectorName       String?
+  collectorPhone      String?
+  collectorAssignedAt DateTime?
+
+  confirmedAt    DateTime?
+  collectedAt    DateTime?
+  processingAt   DateTime?
+  reportReadyAt  DateTime?
+  cancelledAt    DateTime?
+  cancelledBy    String? // CUSTOMER | STORE | ADMIN | SYSTEM
+  cancelReason   String?
+  customerNote   String?
+  isTestBooking  Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  items   LabBookingItem[]
+  events  LabBookingEvent[]
+  reports LabReport[]
+
+  @@index([storeId, status, slotStart])
+  @@index([customerId, createdAt])
+  @@map("lab_bookings")
+}
+
+model LabBookingItem {
+  id           String     @id @default(uuid())
+  bookingId    String
+  booking      LabBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id])
+  testName     String // snapshot
+  unitPrice    Int
+  isRx         Boolean    @default(false)
+  sampleType   String?
+  fastingHours Int?
+  reportHours  Int?
+
+  @@index([bookingId])
+  @@map("lab_booking_items")
+}
+
+model LabBookingEvent {
+  id        String            @id @default(uuid())
+  bookingId String
+  booking   LabBooking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  fromState LabBookingStatus?
+  toState   LabBookingStatus
+  actorType String // CUSTOMER | PARTNER | ADMIN | SYSTEM
+  actorId   String?
+  reason    String?
+  meta      Json?
+  createdAt DateTime          @default(now())
+
+  @@index([bookingId, createdAt])
+  @@map("lab_booking_events")
+}
+
+/// A released report. Amendments add a new version; earlier versions are kept (superseded), never deleted.
+model LabReport {
+  id            String      @id @default(uuid())
+  bookingId     String
+  booking       LabBooking  @relation(fields: [bookingId], references: [id])
+  version       Int
+  fileKey       String // private storage — only served through signed, logged URLs
+  fileHash      String
+  pathologistId String
+  pathologist   Pathologist @relation(fields: [pathologistId], references: [id])
+  releasedById  String // user who released it (attested the pathologist signed it)
+  summary       String?
+  amendReason   String?
+  supersededAt  DateTime?
+  createdAt     DateTime    @default(now())
+
+  accesses LabReportAccess[]
+
+  @@unique([bookingId, version])
+  @@map("lab_reports")
+}
+
+/// Who opened a report (health data — DPDP): every view is recorded.
+model LabReportAccess {
+  id        String    @id @default(uuid())
+  reportId  String
+  report    LabReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  userId    String?
+  actorType String // PARTNER | ADMIN | CUSTOMER
+  purpose   String?
+  ip        String?
+  createdAt DateTime  @default(now())
+
+  @@index([reportId, createdAt])
+  @@map("lab_report_accesses")
+}

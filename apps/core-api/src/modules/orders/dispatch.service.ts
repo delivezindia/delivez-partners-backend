@@ -1,0 +1,133 @@
+import { HttpStatus, Injectable } from '@nestjs/common';
+import type { DeliveryTaskStatus } from '@delivez/db';
+import { ApiError } from '../../common/api-exception.filter';
+import { PrismaService } from '../../prisma/prisma.service';
+import { OrderStateService, type OrderActor } from './order-state.service';
+import { handoverQr, maskPhone, OrdersService } from './orders.service';
+
+const TEST_RIDER_PHONE = '+919999988888';
+
+/** Rider-side steps the admin can play while the rider app doesn't exist (plan §8 manual dispatch). */
+export const TASK_STEPS = ['EN_ROUTE_TO_PICKUP', 'ARRIVED_AT_PICKUP', 'PICKED_UP', 'EN_ROUTE_TO_DROP', 'ARRIVED_AT_DROP', 'DELIVERED', 'FAILED'] as const;
+export type TaskStep = (typeof TASK_STEPS)[number];
+
+const ALLOWED_FROM: Record<TaskStep, DeliveryTaskStatus[]> = {
+  EN_ROUTE_TO_PICKUP: ['ASSIGNED'],
+  ARRIVED_AT_PICKUP: ['ASSIGNED', 'EN_ROUTE_TO_PICKUP'],
+  PICKED_UP: ['ARRIVED_AT_PICKUP', 'WAITING_AT_PICKUP'],
+  EN_ROUTE_TO_DROP: ['PICKED_UP'],
+  ARRIVED_AT_DROP: ['EN_ROUTE_TO_DROP'],
+  DELIVERED: ['EN_ROUTE_TO_DROP', 'ARRIVED_AT_DROP'],
+  FAILED: ['PICKED_UP', 'EN_ROUTE_TO_DROP', 'ARRIVED_AT_DROP'],
+};
+
+/** Dispatch stub + admin order tools (Step 10). Real assignment comes with the rider app / dispatch engine. */
+@Injectable()
+export class DispatchService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly state: OrderStateService,
+    private readonly orders: OrdersService,
+  ) {}
+
+  async adminList(q: { storeId?: string; status?: string; q?: string; limit: number }) {
+    const rows = await this.prisma.order.findMany({
+      where: {
+        ...(q.storeId ? { storeId: q.storeId } : {}),
+        ...(q.status === 'ACTIVE' ? { status: { in: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY_SOON', 'READY', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'] } } : q.status ? { status: q.status as never } : {}),
+        ...(q.q ? { orderNumber: { contains: q.q.toUpperCase() } } : {}),
+      },
+      orderBy: { placedAt: 'desc' },
+      take: q.limit,
+      include: { store: { select: { id: true, name: true } }, deliveryTask: { select: { id: true, status: true } } },
+    });
+    return rows.map((o) => ({
+      id: o.id,
+      orderNumber: o.orderNumber,
+      status: o.status,
+      fulfilmentType: o.fulfilmentType,
+      grandTotal: o.grandTotal,
+      paymentMode: o.paymentMode,
+      isTestOrder: o.isTestOrder,
+      placedAt: o.placedAt,
+      store: o.store,
+      task: o.deliveryTask,
+    }));
+  }
+
+  /** Admin detail. In dev the codes are included so an admin can play the rider/customer. */
+  async adminDetail(orderId: string) {
+    const o = await this.prisma.order.findUnique({ where: { id: orderId }, include: { store: { select: { id: true, name: true } }, deliveryTask: true } });
+    if (!o) throw new ApiError(HttpStatus.NOT_FOUND, 'ORDER_NOT_FOUND', 'Order not found');
+    const view = await this.orders.detailById(orderId);
+    const dev = process.env.NODE_ENV !== 'production';
+    return {
+      ...view,
+      store: o.store,
+      task: o.deliveryTask ? { id: o.deliveryTask.id, status: o.deliveryTask.status } : null,
+      codes: dev ? { handoverOtp: o.handoverOtp, handoverQr: o.handoverOtp ? handoverQr(o.id, o.handoverOtp) : null, pickupOtp: o.pickupOtp, deliveryOtp: o.deliveryOtp } : undefined,
+    };
+  }
+
+  async cancel(orderId: string, reason: string, actor: OrderActor) {
+    await this.state.transition(orderId, 'CANCEL', actor, { reason });
+    return this.adminDetail(orderId);
+  }
+
+  /** Assigns the shared test rider (created on first use). */
+  async assign(taskId: string, actor: OrderActor) {
+    const task = await this.prisma.deliveryTask.findUnique({ where: { id: taskId } });
+    if (!task) throw new ApiError(HttpStatus.NOT_FOUND, 'TASK_NOT_FOUND', 'Delivery task not found');
+    if (!['CREATED', 'SEARCHING_RIDER'].includes(task.status)) throw new ApiError(HttpStatus.CONFLICT, 'TASK_ALREADY_ASSIGNED', `Task is ${task.status.toLowerCase()}`);
+    const rider = await this.testRider();
+    await this.prisma.$transaction(async (tx) => {
+      await this.state.setTask(tx, task, 'ASSIGNED', { rider: { connect: { id: rider.id } }, assignedAt: new Date(), etaToPickupMin: 6 }, actor.kind);
+    });
+    return { taskId, status: 'ASSIGNED', rider: { name: rider.user.fullName, phone: maskPhone(rider.user.phone) } };
+  }
+
+  /** Moves the task like the rider app would, and keeps the order in step. */
+  async step(taskId: string, step: TaskStep, reason: string | undefined, actor: OrderActor) {
+    const task = await this.prisma.deliveryTask.findUnique({ where: { id: taskId }, include: { order: { select: { id: true, status: true } } } });
+    if (!task?.order) throw new ApiError(HttpStatus.NOT_FOUND, 'TASK_NOT_FOUND', 'Delivery task not found');
+    if (!ALLOWED_FROM[step].includes(task.status)) {
+      throw new ApiError(HttpStatus.CONFLICT, 'TASK_INVALID_TRANSITION', `A ${task.status.toLowerCase().replace(/_/g, ' ')} task cannot move to ${step.toLowerCase().replace(/_/g, ' ')}`);
+    }
+    const orderId = task.order.id;
+    const now = new Date();
+    switch (step) {
+      case 'EN_ROUTE_TO_PICKUP':
+        await this.prisma.$transaction((tx) => this.state.setTask(tx, task, 'EN_ROUTE_TO_PICKUP', {}, actor.kind));
+        break;
+      case 'ARRIVED_AT_PICKUP': {
+        // Rider waits if the order isn't ready yet — the store screen shows the waiting timer.
+        const waiting = task.order.status !== 'READY';
+        await this.prisma.$transaction((tx) => this.state.setTask(tx, task, waiting ? 'WAITING_AT_PICKUP' : 'ARRIVED_AT_PICKUP', { arrivedPickupAt: now, ...(waiting ? { waitingStartedAt: now } : {}) }, actor.kind));
+        break;
+      }
+      case 'PICKED_UP':
+        await this.state.transition(orderId, 'HANDOVER', actor, { verifiedBy: 'MANUAL' });
+        break;
+      case 'EN_ROUTE_TO_DROP':
+        await this.state.transition(orderId, 'OUT_FOR_DELIVERY', actor);
+        break;
+      case 'ARRIVED_AT_DROP':
+        await this.state.transition(orderId, 'ARRIVE', actor);
+        break;
+      case 'DELIVERED':
+        await this.state.transition(orderId, 'DELIVER', actor);
+        break;
+      case 'FAILED':
+        await this.state.transition(orderId, 'FAIL_DELIVERY', actor, { reason: reason || 'Delivery failed' });
+        break;
+    }
+    return this.adminDetail(orderId);
+  }
+
+  private async testRider() {
+    const existing = await this.prisma.rider.findFirst({ where: { user: { phone: TEST_RIDER_PHONE } }, include: { user: true } });
+    if (existing) return existing;
+    const user = await this.prisma.user.upsert({ where: { phone: TEST_RIDER_PHONE }, update: {}, create: { phone: TEST_RIDER_PHONE, fullName: 'Ravi (test rider)', phoneVerified: true } });
+    return this.prisma.rider.create({ data: { userId: user.id, riderCode: 'DZR-TEST1', status: 'ACTIVE', vehicleType: 'BIKE', isOnline: true }, include: { user: true } });
+  }
+}

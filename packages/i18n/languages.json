@@ -1,0 +1,50 @@
+[
+  {
+    "code": "EN",
+    "locale": "en-IN",
+    "label": "English",
+    "english": "English"
+  },
+  {
+    "code": "HI",
+    "locale": "hi-IN",
+    "label": "हिन्दी",
+    "english": "Hindi"
+  },
+  {
+    "code": "KN",
+    "locale": "kn-IN",
+    "label": "ಕನ್ನಡ",
+    "english": "Kannada"
+  },
+  {
+    "code": "TA",
+    "locale": "ta-IN",
+    "label": "தமிழ்",
+    "english": "Tamil"
+  },
+  {
+    "code": "TE",
+    "locale": "te-IN",
+    "label": "తెలుగు",
+    "english": "Telugu"
+  },
+  {
+    "code": "ML",
+    "locale": "ml-IN",
+    "label": "മലയാളം",
+    "english": "Malayalam"
+  },
+  {
+    "code": "MR",
+    "locale": "mr-IN",
+    "label": "मराठी",
+    "english": "Marathi"
+  },
+  {
+    "code": "BN",
+    "locale": "bn-IN",
+    "label": "বাংলা",
+    "english": "Bengali"
+  }
+]

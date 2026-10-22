@@ -1,0 +1,10 @@
+{
+  "name": "@delivez/i18n",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "check": "node check.js"
+  }
+}
