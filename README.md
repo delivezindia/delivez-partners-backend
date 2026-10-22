@@ -29,7 +29,7 @@ git config core.hooksPath deploy/backend/hooks    # every future git pull update
 pnpm db:seed                                      # first install only: city, zones, PIN codes, admins, demo store
 pm2 startup                                       # follow the printed command so the API starts after reboots
 ```
-Then nginx: copy `deploy/backend/nginx-api.conf`, set `server_name api.<domain>`, enable, reload, and `sudo certbot --nginx -d api.<domain>`. Check: `https://api.<domain>/v1/health`.
+Then nginx: copy `deploy/backend/nginx-api.conf`, set `server_name partners.api.delivez.com`, enable, reload, and `sudo certbot --nginx -d partners.api.delivez.com`. Check: `https://partners.api.delivez.com/v1/health`.
 
 ## Updating
 ```bash
