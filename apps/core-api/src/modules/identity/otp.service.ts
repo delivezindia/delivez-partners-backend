@@ -1,18 +1,20 @@
-import { HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import type { OtpPurpose } from '@delivez/db';
 import { PrismaService } from '../../prisma/prisma.service';
 import { KvService } from '../../common/kv/kv.service';
 import { ApiError } from '../../common/api-exception.filter';
 import { OTP_SENDER, type OtpSender } from './otp-sender';
+import { showOtpInResponse } from './otp-visibility';
 
 const OTP_TTL_SECONDS = 5 * 60;
 const RESEND_AFTER_SECONDS = 30;
 const MAX_PER_HOUR = 5;
 const MAX_ATTEMPTS = 5;
 
+
 @Injectable()
-export class OtpService {
+export class OtpService implements OnModuleInit {
   private readonly pepper = process.env.OTP_PEPPER ?? 'dev-otp-pepper';
 
   constructor(
@@ -20,6 +22,12 @@ export class OtpService {
     private readonly kv: KvService,
     @Inject(OTP_SENDER) private readonly sender: OtpSender,
   ) {}
+
+  onModuleInit() {
+    if (process.env.NODE_ENV === 'production' && showOtpInResponse()) {
+      new Logger('OTP').warn('OTP_SHOW_IN_RESPONSE is ON: login codes are shown on screen to anyone. Turn it off (or set SMS_PROVIDER=MSG91) before real partners use the app.');
+    }
+  }
 
   async request(phone: string, purpose: OtpPurpose, channel: 'SMS' | 'WHATSAPP') {
     const cooldownKey = `otp:cooldown:${phone}:${purpose}`;
@@ -51,8 +59,8 @@ export class OtpService {
       requestId: otp.id,
       expiresIn: OTP_TTL_SECONDS,
       retryAfter: RESEND_AFTER_SECONDS,
-      // Convenience for local testing only; never returned in production.
-      ...(process.env.NODE_ENV !== 'production' ? { devCode: code } : {}),
+      // Dev always; production only during the temporary OTP_SHOW_IN_RESPONSE window (see showOtpInResponse).
+      ...(showOtpInResponse() ? { devCode: code } : {}),
     };
   }
 
