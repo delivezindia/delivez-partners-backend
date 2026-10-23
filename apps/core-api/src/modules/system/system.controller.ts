@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { KvService } from '../../common/kv/kv.service';
+import { docsMode } from '../../common/docs-auth';
 import { BUILD } from '../../common/version';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminGuard, AdminRoles, ROLES } from '../admin/admin.guard';
@@ -81,6 +82,8 @@ export class SystemController {
       add(unset.length ? 'warn' : 'ok', 'SMS', unset.length ? `MSG91 connected; templates missing for ${unset.join(', ')}` : 'MSG91 connected with all templates');
     }
     if (prod && codesOnScreen) add('warn', 'Login', 'TEST MODE: login codes are shown on screen — anyone can sign in as any number. Switch off before real partners (or connect MSG91).');
+    const docs = docsMode();
+    add('ok', 'API docs', docs === 'off' ? 'Hidden on this server (set DOCS_USERNAME and DOCS_PASSWORD to open /docs with a password)' : docs === 'password' ? 'At /docs, password protected' : 'At /docs, open (development)');
     add(uploadsWritable ? 'ok' : 'error', 'Uploads', uploadsWritable ? `Writable: ${uploadDir}` : `Cannot write to ${uploadDir} — create it and give the API user access`);
     if (prod && !process.env.PUBLIC_API_URL) add('warn', 'Addresses', 'PUBLIC_API_URL is empty — file and photo links only work when the web apps share the API domain');
     if (prod && !cors.length) add('warn', 'Addresses', 'CORS_ORIGINS is empty — browsers on other domains cannot call the API');

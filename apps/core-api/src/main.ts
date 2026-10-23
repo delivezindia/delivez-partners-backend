@@ -6,6 +6,8 @@ import { AppModule } from './app.module';
 import { correlationId } from './common/correlation-id.middleware';
 import { ApiExceptionFilter } from './common/api-exception.filter';
 import { corsOrigin } from './common/public-url';
+import { docsBasicAuth, docsMode, DOCS_PATHS } from './common/docs-auth';
+import { BUILD } from './common/version';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -16,11 +18,17 @@ async function bootstrap() {
   app.useGlobalFilters(new ApiExceptionFilter());
   app.enableShutdownHooks();
 
-  const swagger = new DocumentBuilder().setTitle('Delivez Core API').setVersion('0.1.0').addBearerAuth().build();
-  SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swagger));
+  // API docs: open in dev; on live servers only behind DOCS_USERNAME / DOCS_PASSWORD, otherwise not served.
+  const docs = docsMode();
+  if (docs === 'password') app.use(DOCS_PATHS, docsBasicAuth(process.env.DOCS_USERNAME!, process.env.DOCS_PASSWORD!));
+  if (docs !== 'off') {
+    const swagger = new DocumentBuilder().setTitle('Delivez Core API').setVersion(BUILD.version).addBearerAuth().build();
+    SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swagger));
+  }
 
   const port = Number(process.env.API_PORT ?? 4000);
   await app.listen(port);
-  Logger.log(`Delivez Core API on http://localhost:${port}/v1 - docs at http://localhost:${port}/docs`, 'Bootstrap');
+  const docsNote = docs === 'off' ? 'docs off (set DOCS_USERNAME and DOCS_PASSWORD to enable)' : `docs at /docs${docs === 'password' ? ' (password protected)' : ''}`;
+  Logger.log(`Delivez Core API on http://localhost:${port}/v1 - ${docsNote}`, 'Bootstrap');
 }
 bootstrap();
