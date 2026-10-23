@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import type { DeliveryTaskStatus } from '@delivez/db';
+import type { DeliveryTaskStatus, Prisma } from '@delivez/db';
 import { ApiError } from '../../common/api-exception.filter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderStateService, type OrderActor } from './order-state.service';
@@ -30,18 +30,40 @@ export class DispatchService {
     private readonly orders: OrdersService,
   ) {}
 
-  async adminList(q: { storeId?: string; status?: string; q?: string; limit: number }) {
-    const rows = await this.prisma.order.findMany({
+  /** City-scoped admins only see orders of stores in their cities (empty = all cities). */
+  private scope(cityIds: string[]): Prisma.OrderWhereInput {
+    return cityIds.length ? { store: { cityId: { in: cityIds } } } : {};
+  }
+
+  /** 404 (not 403) for another city's order, so its existence isn't revealed. */
+  private async assertInScope(orderId: string, cityIds: string[]) {
+    if (!cityIds.length) return;
+    const ok = await this.prisma.order.count({ where: { id: orderId, ...this.scope(cityIds) } });
+    if (!ok) throw new ApiError(HttpStatus.NOT_FOUND, 'ORDER_NOT_FOUND', 'Order not found');
+  }
+
+  async adminList(q: { storeId?: string; status?: string; q?: string; limit: number; before?: string }, cityIds: string[] = []) {
+    const scope = this.scope(cityIds);
+    const today = new Date(Date.now() - ((Date.now() + 5.5 * 3600_000) % 86_400_000));
+    const [rows, active, todayCount, missedToday] = await Promise.all([
+      this.prisma.order.findMany({
       where: {
+        ...scope,
+        ...(q.before ? { placedAt: { lt: new Date(q.before) } } : {}),
         ...(q.storeId ? { storeId: q.storeId } : {}),
         ...(q.status === 'ACTIVE' ? { status: { in: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY_SOON', 'READY', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'] } } : q.status ? { status: q.status as never } : {}),
         ...(q.q ? { orderNumber: { contains: q.q.toUpperCase() } } : {}),
       },
       orderBy: { placedAt: 'desc' },
-      take: q.limit,
-      include: { store: { select: { id: true, name: true } }, deliveryTask: { select: { id: true, status: true } } },
-    });
-    return rows.map((o) => ({
+      take: q.limit + 1,
+      include: { store: { select: { id: true, name: true, city: { select: { name: true } } } }, deliveryTask: { select: { id: true, status: true } } },
+      }),
+      this.prisma.order.count({ where: { ...scope, status: { in: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY_SOON', 'READY', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'] } } }),
+      this.prisma.order.count({ where: { ...scope, placedAt: { gte: today } } }),
+      this.prisma.orderStatusEvent.count({ where: { toState: 'REJECTED', actorType: 'SYSTEM', createdAt: { gte: today }, order: scope } }),
+    ]);
+    const page = rows.slice(0, q.limit);
+    const items = page.map((o) => ({
       id: o.id,
       orderNumber: o.orderNumber,
       status: o.status,
@@ -50,13 +72,15 @@ export class DispatchService {
       paymentMode: o.paymentMode,
       isTestOrder: o.isTestOrder,
       placedAt: o.placedAt,
-      store: o.store,
+      store: { id: o.store.id, name: o.store.name, city: o.store.city?.name ?? null },
       task: o.deliveryTask,
     }));
+    return { items, counts: { active, today: todayCount, missedToday }, nextBefore: rows.length > q.limit ? page[page.length - 1].placedAt?.toISOString() ?? null : null };
   }
 
   /** Admin detail. In dev the codes are included so an admin can play the rider/customer. */
-  async adminDetail(orderId: string) {
+  async adminDetail(orderId: string, cityIds: string[] = []) {
+    await this.assertInScope(orderId, cityIds);
     const o = await this.prisma.order.findUnique({ where: { id: orderId }, include: { store: { select: { id: true, name: true } }, deliveryTask: true } });
     if (!o) throw new ApiError(HttpStatus.NOT_FOUND, 'ORDER_NOT_FOUND', 'Order not found');
     const view = await this.orders.detailById(orderId);
@@ -69,15 +93,17 @@ export class DispatchService {
     };
   }
 
-  async cancel(orderId: string, reason: string, actor: OrderActor) {
+  async cancel(orderId: string, reason: string, actor: OrderActor, cityIds: string[] = []) {
+    await this.assertInScope(orderId, cityIds);
     await this.state.transition(orderId, 'CANCEL', actor, { reason });
     return this.adminDetail(orderId);
   }
 
   /** Assigns the shared test rider (created on first use). */
-  async assign(taskId: string, actor: OrderActor) {
+  async assign(taskId: string, actor: OrderActor, cityIds: string[] = []) {
     const task = await this.prisma.deliveryTask.findUnique({ where: { id: taskId } });
     if (!task) throw new ApiError(HttpStatus.NOT_FOUND, 'TASK_NOT_FOUND', 'Delivery task not found');
+    if (task.orderId) await this.assertInScope(task.orderId, cityIds);
     if (!['CREATED', 'SEARCHING_RIDER'].includes(task.status)) throw new ApiError(HttpStatus.CONFLICT, 'TASK_ALREADY_ASSIGNED', `Task is ${task.status.toLowerCase()}`);
     const rider = await this.testRider();
     await this.prisma.$transaction(async (tx) => {
@@ -87,9 +113,10 @@ export class DispatchService {
   }
 
   /** Moves the task like the rider app would, and keeps the order in step. */
-  async step(taskId: string, step: TaskStep, reason: string | undefined, actor: OrderActor) {
+  async step(taskId: string, step: TaskStep, reason: string | undefined, actor: OrderActor, cityIds: string[] = []) {
     const task = await this.prisma.deliveryTask.findUnique({ where: { id: taskId }, include: { order: { select: { id: true, status: true } } } });
     if (!task?.order) throw new ApiError(HttpStatus.NOT_FOUND, 'TASK_NOT_FOUND', 'Delivery task not found');
+    await this.assertInScope(task.order.id, cityIds);
     if (!ALLOWED_FROM[step].includes(task.status)) {
       throw new ApiError(HttpStatus.CONFLICT, 'TASK_INVALID_TRANSITION', `A ${task.status.toLowerCase().replace(/_/g, ' ')} task cannot move to ${step.toLowerCase().replace(/_/g, ' ')}`);
     }

@@ -201,6 +201,7 @@ const adminListQuery = z.object({
   status: z.string().max(30).optional(),
   q: z.string().trim().max(20).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
+  before: z.string().datetime().optional(),
 });
 const adminCancelSchema = z.object({ reason: z.string().trim().min(5).max(300) });
 const taskStepSchema = z.object({ status: z.enum(TASK_STEPS), reason: z.string().trim().max(200).optional() });
@@ -216,33 +217,33 @@ export class AdminOrdersController {
   constructor(private readonly dispatch: DispatchService) {}
 
   @Get('orders')
-  list(@Query(new ZodValidationPipe(adminListQuery)) q: z.infer<typeof adminListQuery>) {
-    return this.dispatch.adminList(q);
+  list(@Query(new ZodValidationPipe(adminListQuery)) q: z.infer<typeof adminListQuery>, @CurrentAdmin() a: AdminContext) {
+    return this.dispatch.adminList(q, a.cityIds);
   }
 
   @Get('orders/:id')
-  detail(@Param('id', ParseUUIDPipe) id: string) {
-    return this.dispatch.adminDetail(id);
+  detail(@Param('id', ParseUUIDPipe) id: string, @CurrentAdmin() a: AdminContext) {
+    return this.dispatch.adminDetail(id, a.cityIds);
   }
 
   @Post('orders/:id/cancel')
   @HttpCode(200)
   @AdminRoles(...ORDER_OPS)
   cancel(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(adminCancelSchema)) b: z.infer<typeof adminCancelSchema>, @CurrentAdmin() a: AdminContext, @Req() r: ApiRequest) {
-    return this.dispatch.cancel(id, b.reason, adminActor(a, r));
+    return this.dispatch.cancel(id, b.reason, adminActor(a, r), a.cityIds);
   }
 
   @Post('tasks/:id/assign')
   @HttpCode(200)
   @AdminRoles(...ROLES.OPERATE_STORES)
   assign(@Param('id', ParseUUIDPipe) id: string, @CurrentAdmin() a: AdminContext, @Req() r: ApiRequest) {
-    return this.dispatch.assign(id, adminActor(a, r));
+    return this.dispatch.assign(id, adminActor(a, r), a.cityIds);
   }
 
   @Post('tasks/:id/status')
   @HttpCode(200)
   @AdminRoles(...ROLES.OPERATE_STORES)
   step(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(taskStepSchema)) b: z.infer<typeof taskStepSchema>, @CurrentAdmin() a: AdminContext, @Req() r: ApiRequest) {
-    return this.dispatch.step(id, b.status, b.reason, adminActor(a, r));
+    return this.dispatch.step(id, b.status, b.reason, adminActor(a, r), a.cityIds);
   }
 }

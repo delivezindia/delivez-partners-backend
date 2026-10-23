@@ -1,3 +1,4 @@
+import { istDate, istDayStart, SOLD } from '../orders/order-reports.service';
 import { HttpStatus, Injectable } from '@nestjs/common';
 import type { DocumentStatus, Prisma, StoreStatus } from '@delivez/db';
 import { ApiError } from '../../common/api-exception.filter';
@@ -324,6 +325,54 @@ export class AdminService {
       oldestDocuments: oldestDocs.map((d) => ({ id: d.id, label: docLabel(d.type), createdAt: d.createdAt, store: d.store })),
       expiringDocuments: expiring.map((d) => ({ id: d.id, label: docLabel(d.type), expiresAt: d.expiresAt, store: d.store })),
       recentActions: actions.map((a) => ({ id: a.id, type: a.type, reason: a.reason, at: a.createdAt, store: a.store, by: a.admin.user.fullName ?? a.admin.role })),
+      orders: await this.orderMetrics(scope),
+    };
+  }
+
+  /** Orders across the admin's cities: today, last 7 days per day, busiest stores, stores missing the most orders. */
+  private async orderMetrics(scope: Prisma.StoreWhereInput) {
+    const from = istDayStart(6);
+    const today = istDate(new Date());
+    const where: Prisma.OrderWhereInput = { store: scope, placedAt: { gte: from }, status: { notIn: ['DRAFT', 'AWAITING_RX_REVIEW'] }, ...(process.env.NODE_ENV === 'production' ? { isTestOrder: false } : {}) };
+    const [orders, missedEvents] = await Promise.all([
+      this.prisma.order.findMany({ where, select: { storeId: true, status: true, grandTotal: true, placedAt: true, store: { select: { name: true } } } }),
+      this.prisma.orderStatusEvent.findMany({ where: { toState: 'REJECTED', actorType: 'SYSTEM', order: where }, select: { orderId: true } }),
+    ]);
+    const missed = new Set(missedEvents.map((e) => e.orderId));
+    const withMissed = await this.prisma.order.findMany({ where: { id: { in: [...missed] } }, select: { id: true, storeId: true, placedAt: true } });
+    const sold = (o: (typeof orders)[number]) => SOLD.includes(o.status);
+
+    const byDay = Array.from({ length: 7 }, (_, i) => {
+      const day = istDate(istDayStart(6 - i));
+      const list = orders.filter((o) => o.placedAt && istDate(o.placedAt) === day);
+      return { date: day, orders: list.length, sold: list.filter(sold).length, missed: withMissed.filter((m) => m.placedAt && istDate(m.placedAt) === day).length, revenue: list.filter(sold).reduce((n, o) => n + o.grandTotal, 0) };
+    });
+    const t = byDay.find((d) => d.date === today) ?? { orders: 0, sold: 0, missed: 0, revenue: 0 };
+
+    const perStore = new Map<string, { id: string; name: string; orders: number; sold: number; missed: number }>();
+    for (const o of orders) {
+      const r = perStore.get(o.storeId) ?? { id: o.storeId, name: o.store.name, orders: 0, sold: 0, missed: 0 };
+      r.orders++;
+      if (sold(o)) r.sold++;
+      perStore.set(o.storeId, r);
+    }
+    for (const m of withMissed) {
+      const r = perStore.get(m.storeId);
+      if (r) r.missed++;
+    }
+    const stores = [...perStore.values()];
+    const total7 = orders.length;
+    const missed7 = withMissed.length;
+    return {
+      today: { orders: t.orders, sold: t.sold, missed: t.missed, revenue: t.revenue },
+      last7Days: byDay,
+      missedRate7d: total7 ? Math.round((missed7 / total7) * 1000) / 10 : 0,
+      busiestStores: [...stores].sort((a, b) => b.orders - a.orders).slice(0, 5),
+      mostMissed: stores
+        .filter((x) => x.orders >= 3 && x.missed > 0)
+        .map((x) => ({ ...x, missedRate: Math.round((x.missed / x.orders) * 1000) / 10 }))
+        .sort((a, b) => b.missedRate - a.missedRate)
+        .slice(0, 5),
     };
   }
 
