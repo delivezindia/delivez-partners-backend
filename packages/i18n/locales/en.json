@@ -59,6 +59,8 @@
   "shell.allOutlets": "All outlets",
   "shell.logout": "Log out",
   "shell.installApp": "Install app",
+  "shell.offline": "You're offline — new orders will appear when you're back online",
+  "shell.notifications": "Notifications",
   "banner.draft": "Your registration is not finished yet.",
   "banner.inReview": "Your application is with our team — we usually review within 24 hours.",
   "banner.continue": "Continue",

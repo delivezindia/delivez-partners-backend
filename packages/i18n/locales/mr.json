@@ -59,6 +59,8 @@
   "shell.allOutlets": "सर्व आउटलेट",
   "shell.logout": "लॉग आउट",
   "shell.installApp": "ॲप इंस्टॉल करा",
+  "shell.offline": "तुम्ही ऑफलाइन आहात — इंटरनेट परत आल्यावर नवीन ऑर्डर दिसतील",
+  "shell.notifications": "सूचना",
   "banner.draft": "तुमची नोंदणी अजून पूर्ण झालेली नाही.",
   "banner.inReview": "तुमचा अर्ज आमच्या टीमकडे आहे — साधारणपणे 24 तासांत तपासणी होते.",
   "banner.continue": "पुढे सुरू ठेवा",

@@ -59,6 +59,8 @@
   "shell.allOutlets": "सभी आउटलेट",
   "shell.logout": "लॉग आउट",
   "shell.installApp": "ऐप इंस्टॉल करें",
+  "shell.offline": "आप ऑफ़लाइन हैं — इंटरनेट लौटने पर नए ऑर्डर दिखेंगे",
+  "shell.notifications": "सूचनाएँ",
   "banner.draft": "आपका रजिस्ट्रेशन अभी पूरा नहीं हुआ है।",
   "banner.inReview": "आपका आवेदन हमारी टीम के पास है — आम तौर पर 24 घंटे में रिव्यू हो जाता है।",
   "banner.continue": "जारी रखें",

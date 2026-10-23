@@ -59,6 +59,8 @@
   "shell.allOutlets": "সব আউটলেট",
   "shell.logout": "লগ আউট",
   "shell.installApp": "অ্যাপ ইনস্টল করুন",
+  "shell.offline": "আপনি অফলাইনে আছেন — ইন্টারনেট ফিরলে নতুন অর্ডার দেখা যাবে",
+  "shell.notifications": "বিজ্ঞপ্তি",
   "banner.draft": "আপনার রেজিস্ট্রেশন এখনও শেষ হয়নি।",
   "banner.inReview": "আপনার আবেদন আমাদের টিমের কাছে আছে — সাধারণত 24 ঘণ্টার মধ্যে দেখা হয়।",
   "banner.continue": "চালিয়ে যান",
