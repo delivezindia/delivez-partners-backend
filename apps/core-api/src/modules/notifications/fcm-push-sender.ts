@@ -25,6 +25,7 @@ const DEFAULT_KEY_PATH = resolve(__dirname, '../../../../../secrets/firebase-ser
 export class FcmPushSender extends PushSender {
   private readonly logger = new Logger('Push');
   private readonly account: ServiceAccount | null;
+  private problem: string | null = null;
   private cached: { token: string; exp: number } | null = null;
 
   constructor() {
@@ -40,13 +41,40 @@ export class FcmPushSender extends PushSender {
 
   private load(): ServiceAccount | null {
     const path = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ? resolve(process.env.FIREBASE_SERVICE_ACCOUNT_PATH) : DEFAULT_KEY_PATH;
-    if (!existsSync(path)) return null;
+    if (!existsSync(path)) {
+      this.problem = `Firebase key file not found. Put it at ${path} and restart the API (pm2 restart delivez-api).`;
+      return null;
+    }
     try {
       const a = JSON.parse(readFileSync(path, 'utf8')) as ServiceAccount;
-      return a.project_id && a.client_email && a.private_key ? a : null;
+      if (a.project_id && a.client_email && a.private_key) return a;
+      this.problem = `Firebase key file at ${path} is missing project_id, client_email or private_key — download a fresh key.`;
+      return null;
     } catch {
       this.logger.error(`Firebase service account at ${path} is not valid JSON`);
+      this.problem = `Firebase key file at ${path} is not valid JSON — download a fresh key.`;
       return null;
+    }
+  }
+
+  describe() {
+    return { mode: this.account ? ('firebase' as const) : ('log' as const), projectId: this.account?.project_id ?? null, problem: this.problem };
+  }
+
+  async verify() {
+    if (!this.account) return { ok: false, error: this.problem ?? 'Firebase key not loaded' };
+    try {
+      this.cached = null; // force a fresh exchange: proves key, clock and network right now
+      await this.accessToken();
+      return { ok: true };
+    } catch (e) {
+      const msg = (e as Error).message;
+      const hint = /invalid_grant/i.test(msg)
+        ? ' — the key was deleted/rotated in Firebase, or the server clock is wrong (check: timedatectl).'
+        : /fetch failed|ENOTFOUND|ECONN|ETIMEDOUT/i.test(msg)
+          ? ' — the server cannot reach oauth2.googleapis.com (outgoing HTTPS blocked?).'
+          : '';
+      return { ok: false, error: msg + hint };
     }
   }
 

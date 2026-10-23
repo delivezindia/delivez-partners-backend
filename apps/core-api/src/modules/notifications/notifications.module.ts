@@ -8,6 +8,6 @@ import { PushSender } from './push-sender';
   controllers: [NotificationsController],
   // FcmPushSender falls back to logging when no service account is present (local dev without keys).
   providers: [NotificationsService, { provide: PushSender, useClass: FcmPushSender }],
-  exports: [NotificationsService],
+  exports: [NotificationsService, PushSender],
 })
 export class NotificationsModule {}

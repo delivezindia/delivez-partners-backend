@@ -29,7 +29,7 @@ interface UploadClaims {
  */
 @Injectable()
 export class StorageService {
-  private readonly root = resolve(process.env.UPLOAD_DIR ?? resolve(__dirname, '../../../uploads'));
+  private readonly root = resolve(process.env.UPLOAD_DIR || resolve(__dirname, '../../../uploads'));
   private readonly secret = process.env.FILE_URL_SECRET ?? 'dev-file-url-secret';
 
   presignUpload(prefix: string, contentType: string, size: number) {

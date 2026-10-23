@@ -6,6 +6,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Public } from '../identity/auth.decorators';
 import { PushSender } from './push-sender';
 import { NotificationsService } from './notifications.service';
+import { webPushConfig } from './web-push-config';
 
 const listQuery = z.object({ before: z.string().datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(30) });
 const deviceSchema = z.object({ token: z.string().min(20).max(4096), platform: z.enum(['WEB', 'ANDROID', 'IOS']) });
@@ -23,15 +24,8 @@ export class NotificationsController {
   @Public()
   @Get('push/config')
   config() {
-    const web = {
-      apiKey: process.env.FIREBASE_WEB_API_KEY,
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-      appId: process.env.FIREBASE_WEB_APP_ID,
-    };
-    const vapidKey = process.env.FIREBASE_VAPID_KEY ?? null;
-    const webReady = !!(web.apiKey && web.projectId && web.messagingSenderId && web.appId && vapidKey);
-    return { webReady, sending: this.push.enabled, web: webReady ? { ...web, authDomain: `${web.projectId}.firebaseapp.com` } : null, vapidKey: webReady ? vapidKey : null };
+    const { webReady, web, vapidKey } = webPushConfig();
+    return { webReady, sending: this.push.enabled, web, vapidKey };
   }
 
   @ApiBearerAuth()

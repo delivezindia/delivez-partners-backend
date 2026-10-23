@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { PrismaService } from '../../prisma/prisma.service';
+import { BUILD } from '../../common/version';
 import { Public } from '../identity/auth.decorators';
 
 @ApiTags('health')
@@ -17,6 +18,6 @@ export class HealthController {
     } catch {
       db = 'down';
     }
-    return { status: db === 'up' ? 'ok' : 'degraded', db, time: new Date().toISOString() };
+    return { status: db === 'up' ? 'ok' : 'degraded', db, version: BUILD.version, commit: BUILD.commit, time: new Date().toISOString() };
   }
 }

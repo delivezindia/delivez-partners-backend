@@ -19,6 +19,20 @@ export class KvService implements OnModuleDestroy {
     }
   }
 
+  get mode(): 'redis' | 'memory' {
+    return this.redis ? 'redis' : 'memory';
+  }
+
+  /** For the admin status page: is Redis reachable? (memory mode is always 'ok'.) */
+  async ping(): Promise<boolean> {
+    if (!this.redis) return true;
+    try {
+      return (await this.redis.ping()) === 'PONG';
+    } catch {
+      return false;
+    }
+  }
+
   async get(key: string): Promise<string | null> {
     if (this.redis) return this.redis.get(key);
     const hit = this.memory.get(key);
