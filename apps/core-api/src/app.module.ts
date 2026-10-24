@@ -14,6 +14,9 @@ import { I18nModule } from './modules/i18n/i18n.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { LabBookingsModule } from './modules/lab-bookings/lab-bookings.module';
 import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
+import { DigestsModule } from './modules/digests/digests.module';
+import { SupportModule } from './modules/support/support.module';
+import { AdminReportsModule } from './modules/admin-reports/admin-reports.module';
 import { PartnersModule } from './modules/partners/partners.module';
 import { FilesModule } from './modules/files/files.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
@@ -43,6 +46,9 @@ import { SystemModule } from './modules/system/system.module';
     OrdersModule,
     LabBookingsModule,
     PharmacyModule,
+    DigestsModule,
+    SupportModule,
+    AdminReportsModule,
     StoresModule,
     CatalogModule,
     NotificationsModule,

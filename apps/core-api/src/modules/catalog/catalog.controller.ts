@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { z } from 'zod';
 import { ApiError } from '../../common/api-exception.filter';
 import type { ApiRequest, AuthUser } from '../../common/request-context';
@@ -24,7 +25,9 @@ import {
 } from './catalog.schemas';
 import { CatalogService } from './catalog.service';
 import { CSV_TEMPLATE, ImportService } from './import.service';
-import { InventoryService } from './inventory.service';
+import { InventoryService, type ExpiryWindow } from './inventory.service';
+
+const inventoryQuery = z.object({ filter: z.enum(['ALL', 'LOW', 'OUT', 'EXPIRING']).default('ALL'), days: z.coerce.number().pipe(z.union([z.literal(30), z.literal(60), z.literal(90)])).default(30) });
 
 const actorOf = (u: AuthUser, r: ApiRequest): Actor => ({ userId: u.userId, ip: r.ip, userAgent: r.header('user-agent'), correlationId: r.correlationId, channel: 'WEB' });
 
@@ -176,8 +179,18 @@ export class CatalogController {
 
   @Get('inventory')
   @PartnerRoles(...STOCK)
-  inventoryList(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(z.object({ filter: z.enum(['ALL', 'LOW', 'OUT', 'EXPIRING']).default('ALL') }))) q: { filter: 'ALL' | 'LOW' | 'OUT' | 'EXPIRING' }) {
-    return this.inventory.list(storeId, q.filter);
+  inventoryList(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(inventoryQuery)) q: z.infer<typeof inventoryQuery>) {
+    return this.inventory.list(storeId, q.filter, q.days as ExpiryWindow);
+  }
+
+  @Get('inventory/expiry.csv')
+  @PartnerRoles(...STOCK)
+  async expiryCsv(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(inventoryQuery)) q: z.infer<typeof inventoryQuery>, @Res() res: Response) {
+    const r = await this.inventory.expiryCsv(storeId, q.days as ExpiryWindow);
+    res.setHeader('content-type', 'text/csv; charset=utf-8');
+    res.setHeader('content-disposition', `attachment; filename="${r.filename}"`);
+    res.setHeader('x-row-count', String(r.count));
+    res.send(r.body);
   }
 
   @Post('products/:id/stock')

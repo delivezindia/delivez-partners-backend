@@ -12,6 +12,9 @@ const MONEY = ['OWNER', 'MANAGER', 'ACCOUNTANT'] as const;
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 const summaryQuery = z.object({ days: z.coerce.number().pipe(z.union([z.literal(1), z.literal(7), z.literal(30)])).default(1) });
 const csvQuery = z.object({ from: day, to: day });
+const gstQuery = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Use YYYY-MM') });
+/** Anyone at the counter can print a customer's bill. */
+const BILL = ['OWNER', 'MANAGER', 'KITCHEN_LEAD', 'COUNTER_STAFF', 'PHARMACIST', 'ACCOUNTANT'] as const;
 
 @ApiTags('reports')
 @ApiBearerAuth()
@@ -35,5 +38,21 @@ export class OrderReportsController {
     res.setHeader('content-disposition', `attachment; filename="${r.filename}"`);
     res.setHeader('x-row-count', String(r.count));
     res.send(r.body);
+  }
+
+  @Get('gst.csv')
+  @PartnerRoles(...MONEY)
+  async gst(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(gstQuery)) q: z.infer<typeof gstQuery>, @Res() res: Response) {
+    const r = await this.reports.gstCsv(storeId, q.month);
+    res.setHeader('content-type', 'text/csv; charset=utf-8');
+    res.setHeader('content-disposition', `attachment; filename="${r.filename}"`);
+    res.setHeader('x-row-count', String(r.count));
+    res.send(r.body);
+  }
+
+  @Get('invoice/:orderId')
+  @PartnerRoles(...BILL)
+  invoice(@Param('storeId', ParseUUIDPipe) storeId: string, @Param('orderId', ParseUUIDPipe) orderId: string) {
+    return this.reports.invoice(storeId, orderId);
   }
 }

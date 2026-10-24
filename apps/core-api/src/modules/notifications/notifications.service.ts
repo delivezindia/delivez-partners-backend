@@ -16,6 +16,7 @@ const RUNNING = ['LIVE', 'LIMITED', 'PAUSED', 'SUSPENDED'];
 export const ORDER_REMINDER_SECONDS = 60;
 const ACCEPT_WINDOW_SECONDS = 180;
 const REMIND_TO: PartnerRole[] = ['OWNER', 'MANAGER', 'PHARMACIST'];
+const SUPPORT_ADMINS: AdminRole[] = ['FOUNDER', 'HEAD_OF_OPS', 'REGIONAL_HEAD', 'CITY_OPS', 'SUPPORT'];
 
 type Recipient = { userId: string; language: string; phone?: string; role?: PartnerRole };
 interface Outgoing {
@@ -166,7 +167,27 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         if (d.status !== 'VERIFIED' && d.status !== 'FAILED') return;
         return this.toStore(e, storeId!, ['OWNER'], { app: 'PARTNERS', code: 'BANK_STATUS', vars: { ok: d.status === 'VERIFIED' ? 1 : 0, store: await this.storeName(storeId!) }, url: `/stores/${storeId}/settings?tab=bank`, tag: `bank-${storeId}` });
 
+      case 'inventory.expiry_digest':
+        return this.toStore(e, storeId!, ['OWNER', 'MANAGER', 'PHARMACIST'], { app: 'PARTNERS', code: 'EXPIRY_ALERT', vars: { expired: d.expired, expiring: d.expiring, days: d.days }, url: `/stores/${storeId}/inventory?filter=EXPIRING`, tag: `expiry-${storeId}`, extra: { date: d.date } });
+      case 'store.daily_summary':
+        return this.toStore(e, storeId!, ['OWNER'], { app: 'PARTNERS', code: 'DAILY_SUMMARY', vars: { store: await this.storeName(storeId!), orders: d.orders, sales: d.revenue, missed: d.missed }, url: `/stores/${storeId}`, tag: `daily-${storeId}`, extra: { date: d.date } });
+      case 'support.admin_replied':
+      case 'support.resolved': {
+        const u = await this.prisma.user.findUnique({ where: { id: d.raisedByUserId }, select: { id: true, language: true } });
+        if (!u) return;
+        const resolved = e.type === 'support.resolved' || d.status === 'RESOLVED';
+        return this.deliver(e, [{ userId: u.id, language: u.language }], { app: 'PARTNERS', code: resolved ? 'SUPPORT_RESOLVED' : 'SUPPORT_REPLY', vars: { ticket: d.ticketNumber, subject: d.subject }, url: `/stores/${storeId}/help?ticket=${d.ticketId}`, tag: `ticket-${d.ticketId}`, storeId });
+      }
+
       // ---- Admin console
+      case 'support.ticket_created':
+        return this.deliver(e, await this.admins(SUPPORT_ADMINS, d.cityId ?? null), { app: 'ADMIN', code: 'ADMIN_SUPPORT', vars: { store: d.storeName, ticket: d.ticketNumber, subject: d.subject }, url: `/support?ticket=${d.ticketId}`, tag: `ticket-${d.ticketId}`, storeId });
+      case 'support.partner_replied': {
+        // The admin handling it, or the city's support people when nobody has picked it up.
+        const owner = d.assignedAdminId ? await this.prisma.adminUser.findFirst({ where: { id: d.assignedAdminId, isActive: true }, select: { user: { select: { id: true, language: true } } } }) : null;
+        const to = owner ? [{ userId: owner.user.id, language: owner.user.language }] : await this.admins(SUPPORT_ADMINS, d.cityId ?? null);
+        return this.deliver(e, to, { app: 'ADMIN', code: 'ADMIN_SUPPORT_REPLY', vars: { store: d.storeName, ticket: d.ticketNumber, subject: d.subject }, url: `/support?ticket=${d.ticketId}`, tag: `ticket-${d.ticketId}`, storeId });
+      }
       case 'onboarding.submitted': {
         const s = await this.prisma.store.findUnique({ where: { id: storeId }, select: { name: true, cityId: true, city: { select: { name: true } } } });
         if (!s) return;

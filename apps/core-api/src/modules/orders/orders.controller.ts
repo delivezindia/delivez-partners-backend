@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { ApiError } from '../../common/api-exception.filter';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { RequireIdempotency } from '../../common/idempotency.interceptor';
@@ -13,6 +14,7 @@ import { DispatchService, TASK_STEPS } from './dispatch.service';
 import { OrderStateService, type OrderActor } from './order-state.service';
 import { OrdersService, type OrderTab } from './orders.service';
 import { SimulatorService } from './simulator.service';
+import { SubstitutionsService } from './substitutions.service';
 
 // Who can do what on the order screen (plan §4.2 role model).
 const VIEW = ['OWNER', 'MANAGER', 'KITCHEN_LEAD', 'COUNTER_STAFF', 'PHARMACIST'] as const;
@@ -41,6 +43,8 @@ const delaySchema = z.object({ minutes: z.number().int().min(5).max(30), reason:
 const handoverSchema = z.object({ otp: z.string().regex(/^\d{4}$/, 'Enter the 4-digit code').optional(), qr: z.string().max(200).optional() }).refine((v) => !!v.otp || !!v.qr, { message: 'Enter the rider’s code or scan the QR', path: ['otp'] });
 const pickupSchema = z.object({ otp: z.string().regex(/^\d{4}$/, 'Enter the 4-digit code') });
 const unavailableSchema = z.object({ switchOff: z.boolean().default(false) });
+const substituteSchema = z.object({ productId: z.string().uuid(), variantId: z.string().uuid().optional(), qty: z.number().int().min(1).max(50), note: z.string().trim().max(200).optional() });
+const respondSchema = z.object({ accept: z.boolean() });
 const itemSchema = z.object({ productId: z.string().uuid(), qty: z.number().int().min(1).max(50), variantId: z.string().uuid().optional(), addonIds: z.array(z.string().uuid()).max(20).optional() });
 const createSchema = z
   .object({
@@ -75,6 +79,7 @@ export class PartnerOrdersController {
   constructor(
     private readonly orders: OrdersService,
     private readonly state: OrderStateService,
+    private readonly substitutions: SubstitutionsService,
   ) {}
 
   @Get()
@@ -182,6 +187,15 @@ export class PartnerOrdersController {
   unavailable(@Param('storeId', ParseUUIDPipe) storeId: string, @Param('orderId', ParseUUIDPipe) orderId: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body(new ZodValidationPipe(unavailableSchema)) b: z.infer<typeof unavailableSchema>, @CurrentUser() u: AuthUser, @CurrentStore() s: StoreAccess, @Req() r: ApiRequest) {
     return this.orders.itemUnavailable(storeId, orderId, itemId, b.switchOff, partnerActor(u, s, r));
   }
+
+  /** Grocery: offer a replacement for an item that ran out; the customer has 5 minutes to answer. */
+  @Post(':orderId/items/:itemId/substitute')
+  @HttpCode(200)
+  @RequireIdempotency()
+  @PartnerRoles(...COUNTER)
+  substitute(@Param('storeId', ParseUUIDPipe) storeId: string, @Param('orderId', ParseUUIDPipe) orderId: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body(new ZodValidationPipe(substituteSchema)) b: z.infer<typeof substituteSchema>, @CurrentUser() u: AuthUser, @CurrentStore() s: StoreAccess, @Req() r: ApiRequest) {
+    return this.substitutions.propose(storeId, orderId, itemId, b, partnerActor(u, s, r));
+  }
 }
 
 /** Dev order simulator — never available in production. */
@@ -191,7 +205,21 @@ export class PartnerOrdersController {
 @UseGuards(StoreAccessGuard)
 @Controller('dev/stores/:storeId/orders')
 export class DevOrdersController {
-  constructor(private readonly simulator: SimulatorService) {}
+  constructor(
+    private readonly simulator: SimulatorService,
+    private readonly substitutions: SubstitutionsService,
+    private readonly orders: OrdersService,
+  ) {}
+
+  /** Plays the customer answering a substitute until the Local app exists. */
+  @Post(':orderId/substitutions/:subId/respond')
+  @HttpCode(200)
+  @PartnerRoles('OWNER', 'MANAGER', 'COUNTER_STAFF')
+  async respond(@Param('storeId', ParseUUIDPipe) storeId: string, @Param('orderId', ParseUUIDPipe) orderId: string, @Param('subId', ParseUUIDPipe) subId: string, @Body(new ZodValidationPipe(respondSchema)) b: z.infer<typeof respondSchema>, @CurrentUser() u: AuthUser) {
+    if (process.env.NODE_ENV === 'production') throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND', 'Not found');
+    await this.orders.mustOwn(storeId, orderId);
+    return this.substitutions.respond(orderId, subId, b.accept, { kind: 'CUSTOMER', userId: u.userId });
+  }
 
   @Post('simulate')
   @PartnerRoles('OWNER', 'MANAGER')

@@ -65,6 +65,7 @@ const ORDER_INCLUDE = {
   customer: { include: { user: { select: { fullName: true, phone: true } } } },
   deliveryTask: { include: { rider: { include: { user: { select: { fullName: true, phone: true } } } } } },
   prescription: { include: { reviewedBy: { select: { name: true, registrationNo: true } } } },
+  substitutions: { orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.OrderInclude;
 type OrderRow = Prisma.OrderGetPayload<{ include: typeof ORDER_INCLUDE }>;
 
@@ -439,6 +440,7 @@ export class OrdersService {
       times: { placedAt: o.placedAt, acceptedAt: o.acceptedAt, preparingAt: o.preparingAt, readySoonAt: o.readySoonAt, readyAt: o.readyAt, pickedUpAt: o.pickedUpAt, deliveredAt: o.deliveredAt, completedAt: o.completedAt, cancelledAt: o.cancelledAt },
       rejectReason: o.rejectReason,
       cancelReason: o.cancelReason,
+      substitutions: o.substitutions.map((s) => ({ id: s.id, itemId: s.orderItemId, name: s.productName, variant: s.variantName, qty: s.qty, lineTotal: s.lineTotal, status: s.status, respondBy: s.respondBy, respondedAt: s.respondedAt })),
       rxReviewBy: o.status === 'AWAITING_RX_REVIEW' ? new Date(o.createdAt.getTime() + RX_REVIEW_MINUTES * 60_000) : null,
       rx: o.prescription
         ? {

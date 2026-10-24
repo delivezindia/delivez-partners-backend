@@ -116,6 +116,9 @@ export class OrderStateService {
           break;
         }
         case 'MARK_READY':
+          if (await tx.orderSubstitution.count({ where: { orderId, status: 'PROPOSED' } })) {
+            throw new ApiError(HttpStatus.CONFLICT, 'SUBSTITUTE_PENDING', 'Wait for the customer to answer the substitute first', { status: order.status });
+          }
           Object.assign(data, { readyAt: now, currentEtaAt: order.fulfilmentType === 'DELIVERY' ? addMin(now, travelMinutes(order.deliveryDistanceKm)) : now });
           if (order.deliveryTask) await this.setTask(tx, order.deliveryTask, null, { readyAtEstimate: now }, actor.kind);
           break;

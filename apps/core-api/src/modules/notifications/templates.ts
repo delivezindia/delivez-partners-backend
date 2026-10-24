@@ -51,6 +51,28 @@ export const TEMPLATES: Record<string, Partial<Record<Lang, Copy>> & { EN: Copy 
     HI: (v) => ({ title: `पर्चा जाँचें · ${v.orderNumber}`, body: `${v.items} आइटम · ${rs(v.total)} · ${v.minutes} मिनट में जाँचें` }),
     KN: (v) => ({ title: `ಪ್ರಿಸ್ಕ್ರಿಪ್ಷನ್ ಪರಿಶೀಲಿಸಿ · ${v.orderNumber}`, body: `${v.items} ಐಟಂ · ${rs(v.total)} · ${v.minutes} ನಿಮಿಷದಲ್ಲಿ ಪರಿಶೀಲಿಸಿ` }),
   },
+  // ---- Partners: daily
+  EXPIRY_ALERT: {
+    EN: (v) => ({ title: 'Stock expiry check', body: `${v.expired ? `${v.expired} item(s) expired · ` : ''}${v.expiring} expiring within ${v.days} days. Take them off the shelf or return them.` }),
+    HI: (v) => ({ title: 'स्टॉक एक्सपायरी जाँच', body: `${v.expired ? `${v.expired} आइटम एक्सपायर · ` : ''}${v.expiring} आइटम ${v.days} दिनों में एक्सपायर होंगे।` }),
+    KN: (v) => ({ title: 'ಸ್ಟಾಕ್ ಅವಧಿ ಪರಿಶೀಲನೆ', body: `${v.expired ? `${v.expired} ಐಟಂ ಅವಧಿ ಮುಗಿದಿದೆ · ` : ''}${v.expiring} ಐಟಂ ${v.days} ದಿನಗಳಲ್ಲಿ ಅವಧಿ ಮುಗಿಯುತ್ತದೆ.` }),
+  },
+  DAILY_SUMMARY: {
+    EN: (v) => ({ title: `Today at ${v.store}`, body: `${v.orders} order(s) · ${rs(v.sales)} sales${v.missed ? ` · ${v.missed} missed` : ''}` }),
+    HI: (v) => ({ title: `आज ${v.store} में`, body: `${v.orders} ऑर्डर · ${rs(v.sales)} बिक्री${v.missed ? ` · ${v.missed} छूटे` : ''}` }),
+    KN: (v) => ({ title: `ಇಂದು ${v.store}`, body: `${v.orders} ಆರ್ಡರ್ · ${rs(v.sales)} ಮಾರಾಟ${v.missed ? ` · ${v.missed} ತಪ್ಪಿದವು` : ''}` }),
+  },
+  // ---- Partners: support
+  SUPPORT_REPLY: {
+    EN: (v) => ({ title: `Delivez support replied · ${v.ticket}`, body: String(v.subject ?? '') }),
+    HI: (v) => ({ title: `Delivez सपोर्ट का जवाब · ${v.ticket}`, body: String(v.subject ?? '') }),
+    KN: (v) => ({ title: `Delivez ಸಹಾಯ ಉತ್ತರಿಸಿದೆ · ${v.ticket}`, body: String(v.subject ?? '') }),
+  },
+  SUPPORT_RESOLVED: {
+    EN: (v) => ({ title: `Ticket ${v.ticket} resolved`, body: `${v.subject}. Reply if it isn’t sorted.` }),
+    HI: (v) => ({ title: `टिकट ${v.ticket} हल हुआ`, body: `${v.subject}. ठीक न हो तो जवाब दें।` }),
+    KN: (v) => ({ title: `ಟಿಕೆಟ್ ${v.ticket} ಪರಿಹಾರವಾಗಿದೆ`, body: `${v.subject}. ಸರಿಯಾಗದಿದ್ದರೆ ಉತ್ತರಿಸಿ.` }),
+  },
   // ---- Partners: labs (no test names — health data)
   LAB_BOOKING: {
     EN: (v) => ({ title: `New booking ${v.bookingNumber}`, body: `${v.when} · ${v.type === 'HOME' ? 'home collection' : 'walk-in'}${v.rx ? ' · check prescription' : ''}` }),
@@ -99,6 +121,12 @@ export const TEMPLATES: Record<string, Partial<Record<Lang, Copy>> & { EN: Copy 
     KN: () => ({ title: 'Delivez ಅಲರ್ಟ್‌ಗಳು ಆನ್ ಆಗಿವೆ', body: 'ಈ ಸಾಧನಕ್ಕೆ ಹೊಸ ಆರ್ಡರ್ ಅಲರ್ಟ್‌ಗಳು ಬರುತ್ತವೆ.' }),
   },
   // ---- Admin console (English)
+  ADMIN_SUPPORT: {
+    EN: (v) => ({ title: `New support ticket · ${v.store}`, body: `${v.ticket}: ${v.subject}` }),
+  },
+  ADMIN_SUPPORT_REPLY: {
+    EN: (v) => ({ title: `${v.store} replied · ${v.ticket}`, body: String(v.subject ?? '') }),
+  },
   ADMIN_REVIEW: { EN: (v) => ({ title: `New application: ${v.store}`, body: `Readiness ${v.score}% · ${v.city ?? 'no city'} — review and approve.` }) },
   ADMIN_DOC: { EN: (v) => ({ title: `Document to verify · ${v.store}`, body: `${v.label} was uploaded.` }) },
 };

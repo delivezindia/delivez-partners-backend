@@ -6,7 +6,18 @@ import { PrismaService } from '../../prisma/prisma.service';
 import type { Actor } from '../onboarding/onboarding.service';
 import { PRODUCT_INCLUDE, toProductView } from './catalog.service';
 
-const EXPIRY_WARNING_DAYS = 30;
+export const EXPIRY_WINDOWS = [30, 60, 90] as const;
+export type ExpiryWindow = (typeof EXPIRY_WINDOWS)[number];
+
+/** Expiry dates are calendar dates (stored at UTC midnight); compare them with today's date in India. */
+const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+const plusDays = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+export function expiryInfo(expiryDate: Date | null | undefined, windowDays: number, today = istToday()) {
+  if (!expiryDate) return { expired: false, expiringSoon: false, daysLeft: null as number | null };
+  const d = expiryDate.toISOString().slice(0, 10);
+  const daysLeft = Math.round((Date.parse(`${d}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+  return { expired: d < today, expiringSoon: d <= plusDays(today, windowDays), daysLeft };
+}
 
 // Stock is a running number plus an append-only movement log (plan §5.4.1, §9.4).
 @Injectable()
@@ -16,24 +27,50 @@ export class InventoryService {
     private readonly events: EventBus,
   ) {}
 
-  async list(storeId: string, filter: 'ALL' | 'LOW' | 'OUT' | 'EXPIRING' = 'ALL') {
+  async list(storeId: string, filter: 'ALL' | 'LOW' | 'OUT' | 'EXPIRING' = 'ALL', days: ExpiryWindow = 30) {
     const rows = await this.prisma.product.findMany({
       where: { storeId, deletedAt: null, inventory: { trackStock: true } },
       include: PRODUCT_INCLUDE,
       orderBy: { name: 'asc' },
     });
-    const soon = new Date(Date.now() + EXPIRY_WARNING_DAYS * 864e5);
-    const items = rows.map((r) => ({ ...toProductView(r), expiringSoon: !!r.inventory?.expiryDate && r.inventory.expiryDate <= soon }));
+    const today = istToday();
+    const items = rows.map((r) => ({ ...toProductView(r), ...expiryInfo(r.inventory?.expiryDate, days, today) }));
     const counts = {
       ALL: items.length,
       LOW: items.filter((i) => i.inventory!.isLow && i.inventory!.available! > 0).length,
       OUT: items.filter((i) => i.inventory!.available! <= 0).length,
       EXPIRING: items.filter((i) => i.expiringSoon).length,
+      EXPIRED: items.filter((i) => i.expired).length,
     };
     const filtered =
-      filter === 'LOW' ? items.filter((i) => i.inventory!.isLow && i.inventory!.available! > 0) : filter === 'OUT' ? items.filter((i) => i.inventory!.available! <= 0) : filter === 'EXPIRING' ? items.filter((i) => i.expiringSoon) : items;
+      filter === 'LOW' ? items.filter((i) => i.inventory!.isLow && i.inventory!.available! > 0) : filter === 'OUT' ? items.filter((i) => i.inventory!.available! <= 0) : filter === 'EXPIRING' ? items.filter((i) => i.expiringSoon).sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0)) : items;
     const untracked = await this.prisma.product.count({ where: { storeId, deletedAt: null, OR: [{ inventory: null }, { inventory: { trackStock: false } }] } });
-    return { items: filtered, counts, untracked };
+    return { items: filtered, counts, untracked, expiryDays: days };
+  }
+
+  /** Expired and soon-to-expire stock as CSV (to return to the distributor or clear on the shelf). */
+  async expiryCsv(storeId: string, days: ExpiryWindow) {
+    const { items } = await this.list(storeId, 'EXPIRING', days);
+    const rs = (p: number) => (p / 100).toFixed(2);
+    const cell = (v: unknown) => {
+      const s = v == null ? '' : String(v);
+      return /[",\n\r]/.test(s) || /^[=+\-@]/.test(s) ? `"${s.replace(/"/g, '""').replace(/^([=+\-@])/, "'$1")}"` : s;
+    };
+    const header = ['Item', 'SKU', 'Batch', 'Expiry date', 'Days left', 'Status', 'In stock', 'Held for orders', 'Stock value (Rs)'];
+    const lines = items.map((i) =>
+      [i.name, i.sku ?? '', i.inventory?.batchNo ?? '', i.inventory?.expiryDate ? new Date(i.inventory.expiryDate).toISOString().slice(0, 10) : '', i.daysLeft ?? '', i.expired ? 'Expired' : 'Expiring', i.inventory?.stockQty ?? 0, i.inventory?.reservedQty ?? 0, rs((i.inventory?.stockQty ?? 0) * i.price)]
+        .map(cell)
+        .join(','),
+    );
+    return { filename: `delivez-expiry-${days}-days-${istToday()}.csv`, body: '\uFEFF' + [header.join(','), ...lines].join('\r\n') + '\r\n', count: items.length };
+  }
+
+  /** Stocked items already expired / expiring within the window — for the morning alert. */
+  async expirySnapshot(storeId: string, days: ExpiryWindow = 30) {
+    const rows = await this.prisma.inventory.findMany({ where: { trackStock: true, stockQty: { gt: 0 }, expiryDate: { not: null }, product: { storeId, deletedAt: null } }, select: { expiryDate: true } });
+    const today = istToday();
+    const info = rows.map((r) => expiryInfo(r.expiryDate, days, today));
+    return { expired: info.filter((i) => i.expired).length, expiring: info.filter((i) => i.expiringSoon && !i.expired).length };
   }
 
   async change(storeId: string, productId: string, input: { mode: 'SET' | 'ADJUST'; qty: number; type: InventoryMovementType; note?: string }, actor: Actor) {

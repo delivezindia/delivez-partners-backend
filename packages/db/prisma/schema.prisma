@@ -468,6 +468,7 @@ model Store {
   carts           Cart[]
   prescriptions   Prescription[]
   reviews         Review[]
+  supportTickets  SupportTicket[]
   settlements     Settlement[]
   ledgerEntries   LedgerEntry[]
   penalties       Penalty[]
@@ -1213,6 +1214,7 @@ model Order {
   review           Review?
   settlementLines  SettlementLine[]
   tickets          SupportTicket[]
+  substitutions    OrderSubstitution[]
   aiPredictions    AiPrediction[]
   couponRedemption CouponRedemption?
 
@@ -1242,6 +1244,39 @@ model OrderItem {
 
   @@index([orderId])
   @@map("order_items")
+}
+
+enum SubstitutionStatus {
+  PROPOSED
+  ACCEPTED
+  DECLINED
+  EXPIRED // customer didn't answer in time → treated as declined
+}
+
+/// Store offers a replacement for an out-of-stock item; the customer accepts or declines (plan §5.5 substitutions).
+model OrderSubstitution {
+  id               String             @id @default(uuid())
+  orderId          String
+  order            Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId      String // the item that ran out
+  productId        String // the replacement
+  productName      String
+  variantId        String?
+  variantName      String?
+  qty              Int
+  unitPrice        Int // paise
+  lineTotal        Int
+  taxRatePct       Float              @default(0)
+  status           SubstitutionStatus @default(PROPOSED)
+  note             String?
+  proposedByUserId String?
+  respondBy        DateTime
+  respondedAt      DateTime?
+  createdAt        DateTime           @default(now())
+
+  @@index([orderId])
+  @@index([status, respondBy])
+  @@map("order_substitutions")
 }
 
 model OrderStatusEvent {
@@ -1817,6 +1852,9 @@ enum TicketStatus {
 
 model SupportTicket {
   id              String       @id @default(uuid())
+  ticketNumber    String?      @unique // SUP-123456
+  storeId         String? // partner tickets: the outlet it is about
+  store           Store?       @relation(fields: [storeId], references: [id])
   raisedByUserId  String
   raisedBy        User         @relation(fields: [raisedByUserId], references: [id])
   raisedByType    String // CUSTOMER | PARTNER | RIDER
@@ -1828,11 +1866,13 @@ model SupportTicket {
   priority        String       @default("NORMAL")
   assignedAdminId String?
   createdAt       DateTime     @default(now())
+  lastMessageAt   DateTime     @default(now())
   resolvedAt      DateTime?
 
   messages TicketMessage[]
 
   @@index([status, priority])
+  @@index([storeId, createdAt])
   @@map("support_tickets")
 }
 
@@ -1844,8 +1884,10 @@ model TicketMessage {
   sender       User          @relation(fields: [senderUserId], references: [id])
   body         String
   attachments  String[]
+  fromAdmin    Boolean       @default(false) // written by Delivez support
   createdAt    DateTime      @default(now())
 
+  @@index([ticketId, createdAt])
   @@map("ticket_messages")
 }
 

@@ -2,6 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import type { OrderStatus, Prisma } from '@delivez/db';
 import { ApiError } from '../../common/api-exception.filter';
 import { PrismaService } from '../../prisma/prisma.service';
+import { gstBill, isGstin } from './gst';
 
 /** Handed over or collected: counts as a sale for the store. */
 export const SOLD: OrderStatus[] = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED', 'DELIVERED', 'COMPLETED'];
@@ -17,7 +18,16 @@ export const istDayStart = (daysBack = 0, now = Date.now()) => {
 export const istDate = (d: Date) => new Date(d.getTime() + IST_MS).toISOString().slice(0, 10);
 const istTime = (d: Date | null) => (d ? new Date(d.getTime() + IST_MS).toISOString().slice(0, 16).replace('T', ' ') : '');
 
-/** Owner / manager / accountant reports for one store: summary numbers and a CSV of orders. */
+const rs = (p: number) => (p / 100).toFixed(2);
+/** CSV cell: quotes when needed, and defuses spreadsheet formulas (=, +, -, @). */
+const cell = (v: unknown) => {
+  const s = v == null ? '' : String(v);
+  return /[",\n\r]/.test(s) || /^[=+\-@]/.test(s) ? `"${s.replace(/"/g, '""').replace(/^([=+\-@])/, "'$1")}"` : s;
+};
+// BOM so Excel opens UTF-8 correctly (names in Kannada, Hindi…).
+const csvBody = (rows: unknown[][]) => '\uFEFF' + rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+
+/** Owner / manager / accountant reports for one store: summary numbers, a CSV of orders, bills and GST. */
 @Injectable()
 export class OrderReportsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -84,11 +94,6 @@ export class OrderReportsService {
       include: { items: { select: { productName: true, variantName: true, qty: true, isOutOfStock: true } }, customer: { select: { user: { select: { fullName: true } } } } },
     });
 
-    const rs = (p: number) => (p / 100).toFixed(2);
-    const cell = (v: unknown) => {
-      const s = v == null ? '' : String(v);
-      return /[",\n\r]/.test(s) || /^[=+\-@]/.test(s) ? `"${s.replace(/"/g, '""').replace(/^([=+\-@])/, "'$1")}"` : s;
-    };
     const header = ['Order', 'Placed (IST)', 'Status', 'Type', 'Customer', 'Items', 'Items total (Rs)', 'Delivery (Rs)', 'Packaging (Rs)', 'Discount (Rs)', 'Total (Rs)', 'Payment', 'Payment status', 'Accepted', 'Ready', 'Handed over / collected', 'Delivered', 'Reason', 'Test order'];
     const lines = rows.map((o) =>
       [
@@ -117,5 +122,111 @@ export class OrderReportsService {
     );
     // BOM so Excel opens UTF-8 correctly (names in Kannada, Hindi…).
     return { filename: `delivez-orders-${fromDate}-to-${toDate}.csv`, body: '﻿' + [header.join(','), ...lines].join('\r\n') + '\r\n', count: rows.length };
+  }
+
+  // ------------------------------------------------------------------
+  // Bills & GST
+  // ------------------------------------------------------------------
+
+  /** The shop's GST registration: the account GSTIN, else a verified GSTIN document. */
+  private async taxIdentity(storeId: string) {
+    const store = await this.prisma.store.findUnique({
+      where: { id: storeId },
+      include: { partnerAccount: { select: { legalName: true, gstin: true } }, city: { select: { name: true, state: true } }, documents: { where: { status: 'VERIFIED', type: { in: ['GSTIN', 'FSSAI', 'DRUG_LICENSE_DL20', 'DRUG_LICENSE_DL21'] } }, select: { type: true, documentNumber: true } } },
+    });
+    if (!store) throw new ApiError(HttpStatus.NOT_FOUND, 'STORE_NOT_FOUND', 'Store not found');
+    const doc = (t: string) => store.documents.find((d) => d.type === t)?.documentNumber?.trim() || null;
+    const gstin = (store.partnerAccount.gstin ?? doc('GSTIN'))?.trim().toUpperCase() || null;
+    return {
+      store,
+      gstin: isGstin(gstin) ? gstin : null,
+      fssai: store.vertical === 'EAT' ? doc('FSSAI') : null,
+      drugLicences: store.vertical === 'PHARMACY' ? [doc('DRUG_LICENSE_DL20'), doc('DRUG_LICENSE_DL21')].filter((x): x is string => !!x) : [],
+    };
+  }
+
+  /** Customer bill for one order: a tax invoice when the shop has a GSTIN, otherwise a bill of supply. */
+  async invoice(storeId: string, orderId: string) {
+    const o = await this.prisma.order.findFirst({
+      where: { id: orderId, storeId },
+      include: { items: { where: { isOutOfStock: false }, include: { product: { select: { hsnCode: true } } } }, customer: { select: { user: { select: { fullName: true } } } } },
+    });
+    if (!o || ['DRAFT', 'AWAITING_RX_REVIEW'].includes(o.status)) throw new ApiError(HttpStatus.NOT_FOUND, 'ORDER_NOT_FOUND', 'Order not found');
+    const id = await this.taxIdentity(storeId);
+    const s = id.store;
+    const bill = gstBill(
+      o.items.map((i) => ({ name: `${i.productName}${i.variantName ? ` (${i.variantName})` : ''}`, hsn: i.product.hsnCode, qty: i.qty, ratePct: i.taxRatePct, total: i.lineTotal })),
+      o.packagingFee,
+      !!id.gstin,
+    );
+    return {
+      kind: id.gstin ? 'TAX_INVOICE' : 'BILL_OF_SUPPLY',
+      number: o.orderNumber,
+      date: o.placedAt ?? o.createdAt,
+      store: {
+        name: s.name,
+        legalName: s.partnerAccount.legalName,
+        address: [s.addressLine1, s.addressLine2, s.landmark, s.city?.name, s.pincode].filter(Boolean).join(', '),
+        state: s.city?.state ?? null,
+        phone: s.phone,
+        gstin: id.gstin,
+        fssai: id.fssai,
+        drugLicences: id.drugLicences,
+      },
+      customer: o.customer.user.fullName?.split(/\s+/)[0] ?? 'Customer',
+      fulfilmentType: o.fulfilmentType,
+      payment: o.paymentMode === 'COD' ? 'Cash' : 'Paid online',
+      status: o.status,
+      bill,
+      delivery: o.deliveryFee,
+      discount: o.discountAmount,
+      grandTotal: o.grandTotal,
+    };
+  }
+
+  /** Month of sales split by GST rate, one row per bill and rate, then totals — for the accountant / GSTR-1. */
+  async gstCsv(storeId: string, month: string) {
+    const from = new Date(`${month}-01T00:00:00+05:30`);
+    if (Number.isNaN(from.getTime())) throw new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', 'Use YYYY-MM');
+    const [y, m] = month.split('-').map(Number);
+    const to = new Date(`${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01T00:00:00+05:30`);
+    const id = await this.taxIdentity(storeId);
+    const orders = await this.prisma.order.findMany({
+      where: { storeId, placedAt: { gte: from, lt: to }, status: { in: SOLD }, ...this.realOnly() },
+      orderBy: { placedAt: 'asc' },
+      take: 50_000,
+      include: { items: { where: { isOutOfStock: false }, include: { product: { select: { hsnCode: true } } } } },
+    });
+    const rows: unknown[][] = [
+      [id.gstin ? `GST sales report — ${id.store.partnerAccount.legalName} — GSTIN ${id.gstin} — ${month}` : `Sales report — ${id.store.partnerAccount.legalName} — not registered under GST (bills of supply) — ${month}`],
+      ['Prices include GST; tax is worked back from each line. Packaging is taxed at the highest item rate on the bill. Delivery is charged by Delivez and is not included.'],
+      [],
+      ['Invoice', 'Date (IST)', 'GST rate %', 'Taxable value (Rs)', 'CGST (Rs)', 'SGST (Rs)', 'Invoice value at this rate (Rs)'],
+    ];
+    const totals = new Map<number, { taxable: number; cgst: number; sgst: number; total: number; bills: Set<string> }>();
+    for (const o of orders) {
+      const b = gstBill(o.items.map((i) => ({ name: i.productName, hsn: i.product.hsnCode, qty: i.qty, ratePct: i.taxRatePct, total: i.lineTotal })), o.packagingFee, !!id.gstin);
+      for (const r of b.byRate) {
+        rows.push([o.orderNumber, istTime(o.placedAt), r.ratePct, rs(r.taxable), rs(r.cgst), rs(r.sgst), rs(r.total)]);
+        const t = totals.get(r.ratePct) ?? { taxable: 0, cgst: 0, sgst: 0, total: 0, bills: new Set<string>() };
+        t.taxable += r.taxable;
+        t.cgst += r.cgst;
+        t.sgst += r.sgst;
+        t.total += r.total;
+        t.bills.add(o.orderNumber);
+        totals.set(r.ratePct, t);
+      }
+    }
+    rows.push([], ['Summary by rate', 'Bills', 'GST rate %', 'Taxable value (Rs)', 'CGST (Rs)', 'SGST (Rs)', 'Total (Rs)']);
+    const all = { taxable: 0, cgst: 0, sgst: 0, total: 0 };
+    for (const [rate, t] of [...totals.entries()].sort((a, b) => a[0] - b[0])) {
+      rows.push(['', t.bills.size, rate, rs(t.taxable), rs(t.cgst), rs(t.sgst), rs(t.total)]);
+      all.taxable += t.taxable;
+      all.cgst += t.cgst;
+      all.sgst += t.sgst;
+      all.total += t.total;
+    }
+    rows.push(['Total', orders.length, '', rs(all.taxable), rs(all.cgst), rs(all.sgst), rs(all.total)]);
+    return { filename: `delivez-gst-${month}.csv`, body: csvBody(rows), count: orders.length };
   }
 }
