@@ -6,6 +6,8 @@ import type { FulfilmentType, OrderStatus } from '@delivez/db';
 export type ActorKind = 'PARTNER' | 'SYSTEM' | 'ADMIN' | 'RIDER' | 'CUSTOMER';
 
 export type OrderAction =
+  | 'RX_APPROVE'
+  | 'RX_REJECT'
   | 'ACCEPT'
   | 'REJECT'
   | 'START_PREPARING'
@@ -33,6 +35,9 @@ interface Rule {
 const KITCHEN: OrderStatus[] = ['ACCEPTED', 'PREPARING', 'READY_SOON'];
 
 export const RULES: Record<OrderAction, Rule> = {
+  // Pharmacy: a registered pharmacist checks the prescription before the store sees a new order.
+  RX_APPROVE: { from: ['AWAITING_RX_REVIEW'], to: 'PLACED', actors: ['PARTNER'] },
+  RX_REJECT: { from: ['AWAITING_RX_REVIEW'], to: 'REJECTED', actors: ['PARTNER'], needsReason: true },
   ACCEPT: { from: ['PLACED'], to: 'ACCEPTED', actors: ['PARTNER', 'SYSTEM'] },
   REJECT: { from: ['PLACED'], to: 'REJECTED', actors: ['PARTNER', 'SYSTEM'], needsReason: true },
   START_PREPARING: { from: ['ACCEPTED'], to: 'PREPARING', actors: ['PARTNER', 'SYSTEM'] },
@@ -47,10 +52,10 @@ export const RULES: Record<OrderAction, Rule> = {
   DELIVER: { from: ['OUT_FOR_DELIVERY', 'ARRIVED'], to: 'DELIVERED', actors: ['RIDER', 'ADMIN'], fulfilment: 'DELIVERY' },
   FAIL_DELIVERY: { from: ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'], to: 'DELIVERY_FAILED', actors: ['RIDER', 'ADMIN'], fulfilment: 'DELIVERY', needsReason: true },
   CANCEL: {
-    from: ['PLACED', ...KITCHEN, 'READY'],
+    from: ['AWAITING_RX_REVIEW', 'PLACED', ...KITCHEN, 'READY'],
     to: 'CANCELLED',
     actors: ['CUSTOMER', 'ADMIN', 'SYSTEM'],
-    fromFor: { CUSTOMER: ['PLACED'] },
+    fromFor: { CUSTOMER: ['AWAITING_RX_REVIEW', 'PLACED'] },
     needsReason: true,
   },
 };
@@ -82,6 +87,8 @@ export function checkTransition(action: OrderAction, order: { status: OrderStatu
 
 export function humanAction(action: OrderAction) {
   const words: Record<OrderAction, string> = {
+    RX_APPROVE: 'have its prescription approved',
+    RX_REJECT: 'have its prescription rejected',
     ACCEPT: 'be accepted',
     REJECT: 'be rejected',
     START_PREPARING: 'start preparing',

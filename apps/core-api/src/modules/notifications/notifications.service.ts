@@ -114,6 +114,11 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       case 'order.placed':
         if (byPartner) return; // the store typed it in itself
         return this.toStore(e, storeId!, ORDER_ROLES, { app: 'PARTNERS', code: 'ORDER_PLACED', vars: { orderNumber: d.orderNumber, items: d.itemCount, total: d.grandTotal }, url: orders(), tag: `order-${d.orderId}`, urgent: true });
+      case 'order.rx_submitted':
+        return this.toStore(e, storeId!, REMIND_TO, { app: 'PARTNERS', code: 'RX_REVIEW', vars: { orderNumber: d.orderNumber, items: d.itemCount, total: d.grandTotal, minutes: d.reviewMinutes }, url: `/stores/${storeId}/prescriptions`, tag: `order-${d.orderId}`, urgent: true });
+      case 'order.rx_approved':
+        // Approved by the pharmacist: now it is a new order for the counter/kitchen to accept.
+        return this.toStore(e, storeId!, ORDER_ROLES, { app: 'PARTNERS', code: 'ORDER_PLACED', vars: { orderNumber: d.orderNumber, items: d.itemCount, total: d.grandTotal }, url: orders(), tag: `order-${d.orderId}`, urgent: true });
       case 'order.rejected':
         if (e.actor?.type !== 'SYSTEM') return; // only timeouts are news to the store
         return this.toStore(e, storeId!, LEADS, { app: 'PARTNERS', code: 'ORDER_MISSED', vars: { orderNumber: d.orderNumber }, url: orders(d.orderNumber), tag: `order-${d.orderId}`, offApp: OWNER_SMS });

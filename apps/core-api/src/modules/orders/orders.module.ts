@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AdminGuard } from '../admin/admin.guard';
+import { FilesModule } from '../files/files.module';
 import { PartnersModule } from '../partners/partners.module';
 import { DispatchService } from './dispatch.service';
 import { OrderJobsScheduler } from './order-jobs.scheduler';
@@ -11,7 +12,7 @@ import { OrderReportsService } from './order-reports.service';
 import { SimulatorService } from './simulator.service';
 
 @Module({
-  imports: [PartnersModule],
+  imports: [PartnersModule, FilesModule],
   controllers: [PartnerOrdersController, DevOrdersController, AdminOrdersController, OrderReportsController],
   providers: [OrderStateService, OrdersService, DispatchService, SimulatorService, OrderJobsScheduler, OrderReportsService, AdminGuard],
   exports: [OrderStateService, OrdersService, OrderReportsService],

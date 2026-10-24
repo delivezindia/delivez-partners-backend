@@ -6,6 +6,8 @@ import { haversineKm } from '../../common/geo';
 import { KvService } from '../../common/kv/kv.service';
 import { EventBus } from '../../events/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../files/storage.service';
+import { pharmacistsOnDuty } from '../pharmacy/duty';
 import { ACTIVE_STATES } from './order-state';
 import { OrderStateService, travelMinutes, type OrderActor } from './order-state.service';
 
@@ -34,12 +36,17 @@ export interface CreateOrderInput {
   isTestOrder?: boolean;
   /** Store-created orders start accepted (prep time optional — store default if omitted). */
   startAccepted?: { prepMinutes?: number };
+  /** Customer-uploaded prescription files (keys under stores/{id}/rx/) for Schedule H/H1 medicines. */
+  prescriptionFileKeys?: string[];
+  /** Store-created pharmacy orders: staff confirm they have seen a valid prescription. */
+  rxSeenByStore?: boolean;
   /** Dev simulator only: pretend the order was placed earlier (to exercise the timeout job). */
   placedSecondsAgo?: number;
 }
 
-export type OrderTab = 'NEW' | 'PREPARING' | 'READY' | 'DONE' | 'CANCELLED' | 'ALL';
+export type OrderTab = 'RX' | 'NEW' | 'PREPARING' | 'READY' | 'DONE' | 'CANCELLED' | 'ALL';
 export const TAB_STATES: Record<Exclude<OrderTab, 'ALL'>, OrderStatus[]> = {
+  RX: ['AWAITING_RX_REVIEW'],
   NEW: ['PLACED'],
   PREPARING: ['ACCEPTED', 'PREPARING', 'READY_SOON'],
   READY: ['READY'],
@@ -48,6 +55,8 @@ export const TAB_STATES: Record<Exclude<OrderTab, 'ALL'>, OrderStatus[]> = {
 };
 
 export const ACCEPT_TIMEOUT_SECONDS = 180;
+/** A prescription not reviewed in this time is cancelled and refunded (the customer is waiting). */
+export const RX_REVIEW_MINUTES = 15;
 const DELIVERY_FEE = 3000; // paise — flat until pricing lands
 const OTP_ATTEMPTS = 5;
 
@@ -55,6 +64,7 @@ const ORDER_INCLUDE = {
   items: true,
   customer: { include: { user: { select: { fullName: true, phone: true } } } },
   deliveryTask: { include: { rider: { include: { user: { select: { fullName: true, phone: true } } } } } },
+  prescription: { include: { reviewedBy: { select: { name: true, registrationNo: true } } } },
 } satisfies Prisma.OrderInclude;
 type OrderRow = Prisma.OrderGetPayload<{ include: typeof ORDER_INCLUDE }>;
 
@@ -67,6 +77,7 @@ export class OrdersService {
     private readonly state: OrderStateService,
     private readonly events: EventBus,
     private readonly kv: KvService,
+    private readonly storage: StorageService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -91,9 +102,34 @@ export class OrdersService {
     }
 
     const placedAt = new Date(Date.now() - (input.placedSecondsAgo ?? 0) * 1000);
+    const manual = input.channel === 'PARTNER_MANUAL';
+    let awaitingRx = false;
     const created = await this.prisma.$transaction(async (tx) => {
       const customer = await this.ensureCustomer(tx, input.customer.phone, input.customer.name);
       const priced = await this.price(tx, store.id, store.vertical, input.items);
+
+      // Schedule H/H1 medicines: only while a registered pharmacist is on duty, and only with a prescription.
+      const rxItems = store.vertical === 'PHARMACY' ? priced.filter((i) => i.isRx) : [];
+      let prescriptionId: string | undefined;
+      let rxMeta: Record<string, unknown> | undefined;
+      if (rxItems.length) {
+        const names = rxItems.map((i) => i.productName);
+        const onDuty = await pharmacistsOnDuty(this.prisma, store.id);
+        if (!onDuty.length) throw new ApiError(HttpStatus.CONFLICT, 'NO_PHARMACIST_ON_DUTY', 'Prescription medicines can only be ordered while a pharmacist is on duty', { items: names });
+        if (manual) {
+          if (!input.rxSeenByStore) throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'RX_REQUIRED', 'Confirm a pharmacist has checked the customer’s prescription', { items: names });
+          rxMeta = { rxSeenByStore: true, pharmacistsOnDuty: onDuty.map((p) => `${p.name} (${p.registrationNo})`) };
+        } else {
+          const keys = input.prescriptionFileKeys ?? [];
+          if (!keys.length) throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'RX_REQUIRED', 'Upload the doctor’s prescription for these medicines', { items: names });
+          if (keys.some((k) => !k.startsWith(`stores/${store.id}/rx/`))) throw new ApiError(HttpStatus.BAD_REQUEST, 'FILE_KEY_INVALID', 'Upload the prescription again');
+          const hashes = await Promise.all(keys.map((k) => this.storage.hashOf(k)));
+          if (hashes.some((h) => !h)) throw new ApiError(HttpStatus.BAD_REQUEST, 'FILE_NOT_FOUND', 'Prescription upload not found');
+          const rx = await tx.prescription.create({ data: { customerId: customer.id, storeId: store.id, fileUrls: keys, fileHash: hashes.join(':'), status: 'UNDER_REVIEW' } });
+          prescriptionId = rx.id;
+          awaitingRx = true;
+        }
+      }
       const itemsSubtotal = priced.reduce((s, i) => s + i.lineTotal, 0);
       const deliveryFee = input.fulfilmentType === 'DELIVERY' ? DELIVERY_FEE : 0;
       const packagingFee = store.vertical === 'EAT' ? store.packagingFee : 0;
@@ -108,7 +144,8 @@ export class OrdersService {
           vertical: store.vertical,
           channel: input.channel,
           fulfilmentType: input.fulfilmentType,
-          status: 'PLACED',
+          status: awaitingRx ? 'AWAITING_RX_REVIEW' : 'PLACED',
+          prescriptionId,
           deliveryAddress: input.address ? { ...input.address, contactName: input.customer.name ?? null, contactPhone: customer.phone } : undefined,
           deliveryDistanceKm: distanceKm,
           itemsSubtotal,
@@ -118,6 +155,8 @@ export class OrdersService {
           paymentMode: input.paymentMode,
           paymentStatus: paid ? 'CAPTURED' : 'COD_PENDING',
           placedAt,
+          // Dev simulator backdating moves the whole order, so the prescription review timeout can be tested too.
+          ...(input.placedSecondsAgo ? { createdAt: placedAt } : {}),
           promisedDeliveryAt: new Date(placedAt.getTime() + (store.defaultPrepMinutes + (input.fulfilmentType === 'DELIVERY' ? travelMinutes(distanceKm) : 0)) * 60_000),
           handoverOtp: otp(),
           deliveryOtp: input.fulfilmentType === 'DELIVERY' ? otp() : null,
@@ -148,9 +187,9 @@ export class OrdersService {
         await tx.inventoryMovement.create({ data: { inventoryId: inv.id, type: 'RESERVE', qtyDelta: -item.qty, orderId: order.id, note: `Order ${order.orderNumber}`, actorUserId: actor.userId } });
       }
 
-      await tx.orderStatusEvent.create({ data: { orderId: order.id, toState: 'PLACED', actorType: actor.kind, actorId: actor.userId, meta: { channel: input.channel } } });
+      await tx.orderStatusEvent.create({ data: { orderId: order.id, toState: order.status, actorType: actor.kind, actorId: actor.userId, meta: { channel: input.channel, ...rxMeta } as Prisma.InputJsonValue } });
       await this.events.publish(tx, {
-        type: 'order.placed',
+        type: awaitingRx ? 'order.rx_submitted' : 'order.placed',
         data: {
           storeId: store.id,
           orderId: order.id,
@@ -159,7 +198,9 @@ export class OrdersService {
           grandTotal,
           fulfilmentType: input.fulfilmentType,
           isTestOrder: !!input.isTestOrder,
-          acceptBy: new Date(placedAt.getTime() + ACCEPT_TIMEOUT_SECONDS * 1000).toISOString(),
+          ...(awaitingRx
+            ? { reviewMinutes: RX_REVIEW_MINUTES, reviewBy: new Date(order.createdAt.getTime() + RX_REVIEW_MINUTES * 60_000).toISOString() }
+            : { acceptBy: new Date(placedAt.getTime() + ACCEPT_TIMEOUT_SECONDS * 1000).toISOString() }),
         },
         actor: { type: actor.kind, userId: actor.userId, role: actor.role },
         correlationId: actor.correlationId,
@@ -167,7 +208,9 @@ export class OrdersService {
       return order;
     });
 
-    if (input.startAccepted) {
+    if (awaitingRx) {
+      // Waits for the pharmacist; the store sees it as a new order once the prescription is approved.
+    } else if (input.startAccepted) {
       await this.state.transition(created.id, 'ACCEPT', actor.kind === 'PARTNER' ? actor : { kind: 'SYSTEM' }, { prepMinutes: input.startAccepted.prepMinutes, meta: { storeCreated: true } });
     } else if (store.autoAcceptOrders) {
       await this.state.transition(created.id, 'ACCEPT', { kind: 'SYSTEM' }, { meta: { autoAccept: true } });
@@ -186,9 +229,6 @@ export class OrdersService {
       const p = products.find((x) => x.id === it.productId);
       if (!p) throw new ApiError(HttpStatus.BAD_REQUEST, 'PRODUCT_NOT_FOUND', 'An item is not on this store’s menu');
       if (!p.isAvailable || (p.pausedUntil && p.pausedUntil > now)) throw new ApiError(HttpStatus.CONFLICT, 'ITEM_UNAVAILABLE', `${p.name} is not available right now`);
-      if (vertical === 'PHARMACY' && p.prescriptionRequired) {
-        throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'RX_NOT_SUPPORTED_YET', `${p.name} needs a prescription — prescription orders arrive with the prescriptions module`);
-      }
       const variant = it.variantId ? p.variants.find((v) => v.id === it.variantId) : p.variants.find((v) => v.isDefault);
       if (it.variantId && !variant) throw new ApiError(HttpStatus.BAD_REQUEST, 'VARIANT_NOT_FOUND', `Unknown size for ${p.name}`);
       const allAddons = p.addonGroups.flatMap((g) => g.addons);
@@ -257,7 +297,7 @@ export class OrdersService {
     await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`;
       const o = await this.mustOwn(storeId, orderId, tx);
-      if (!['PLACED', 'ACCEPTED', 'PREPARING'].includes(o.status)) {
+      if (!['AWAITING_RX_REVIEW', 'PLACED', 'ACCEPTED', 'PREPARING'].includes(o.status)) {
         throw new ApiError(HttpStatus.CONFLICT, 'ORDER_INVALID_TRANSITION', 'Items can only be removed before the order is ready', { status: o.status });
       }
       const items = await tx.orderItem.findMany({ where: { orderId } });
@@ -336,7 +376,7 @@ export class OrdersService {
   async list(storeId: string, tab: OrderTab, cursor?: string, limit = 50) {
     const states = tab === 'ALL' ? undefined : TAB_STATES[tab];
     // Active tabs show everything (oldest first, the order of work); history tabs page newest-first.
-    const active = tab === 'NEW' || tab === 'PREPARING' || tab === 'READY';
+    const active = tab === 'RX' || tab === 'NEW' || tab === 'PREPARING' || tab === 'READY';
     const rows = await this.prisma.order.findMany({
       where: { storeId, ...(states ? { status: { in: states } } : { status: { notIn: ['DRAFT', 'AWAITING_RX_REVIEW'] } }), ...(cursor && !active ? { placedAt: { lt: new Date(cursor) } } : {}) },
       include: ORDER_INCLUDE,
@@ -344,11 +384,11 @@ export class OrdersService {
       take: active ? 200 : limit + 1,
     });
     const page = active ? rows : rows.slice(0, limit);
-    const grouped = await this.prisma.order.groupBy({ by: ['status'], where: { storeId, status: { in: [...ACTIVE_STATES] } }, _count: { _all: true } });
+    const grouped = await this.prisma.order.groupBy({ by: ['status'], where: { storeId, status: { in: [...ACTIVE_STATES, 'AWAITING_RX_REVIEW'] } }, _count: { _all: true } });
     const count = (s: OrderStatus[]) => grouped.filter((g) => s.includes(g.status)).reduce((n, g) => n + g._count._all, 0);
     return {
       orders: page.map((o) => this.view(o)),
-      counts: { NEW: count(TAB_STATES.NEW), PREPARING: count(TAB_STATES.PREPARING), READY: count(TAB_STATES.READY) },
+      counts: { RX: count(TAB_STATES.RX), NEW: count(TAB_STATES.NEW), PREPARING: count(TAB_STATES.PREPARING), READY: count(TAB_STATES.READY) },
       nextCursor: !active && rows.length > limit ? page[page.length - 1].placedAt?.toISOString() ?? null : null,
     };
   }
@@ -399,6 +439,22 @@ export class OrdersService {
       times: { placedAt: o.placedAt, acceptedAt: o.acceptedAt, preparingAt: o.preparingAt, readySoonAt: o.readySoonAt, readyAt: o.readyAt, pickedUpAt: o.pickedUpAt, deliveredAt: o.deliveredAt, completedAt: o.completedAt, cancelledAt: o.cancelledAt },
       rejectReason: o.rejectReason,
       cancelReason: o.cancelReason,
+      rxReviewBy: o.status === 'AWAITING_RX_REVIEW' ? new Date(o.createdAt.getTime() + RX_REVIEW_MINUTES * 60_000) : null,
+      rx: o.prescription
+        ? {
+            id: o.prescription.id,
+            status: o.prescription.status,
+            files: o.prescription.fileUrls.length,
+            doctorName: o.prescription.doctorName,
+            doctorRegNo: o.prescription.doctorRegNo,
+            issuedOn: o.prescription.issuedOn,
+            patientName: o.prescription.patientName,
+            reviewedBy: o.prescription.reviewedBy ? { name: o.prescription.reviewedBy.name, registrationNo: o.prescription.reviewedBy.registrationNo } : null,
+            reviewedAt: o.prescription.reviewedAt,
+            notes: o.prescription.reviewNotes,
+            rejectionReason: o.prescription.rejectionReason,
+          }
+        : null,
       rider: task
         ? {
             taskStatus: task.status,

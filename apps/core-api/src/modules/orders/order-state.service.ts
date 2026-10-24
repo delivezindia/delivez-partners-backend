@@ -21,9 +21,13 @@ export interface TransitionOptions {
   windowMinutes?: number;
   /** HANDOVER: how the rider was verified. */
   verifiedBy?: 'OTP' | 'QR' | 'MANUAL';
+  /** Extra writes that must commit with the transition (e.g. the prescription review), run after the rule check. */
+  inTx?: (tx: Prisma.TransactionClient, order: { id: string; status: OrderStatus; prescriptionId: string | null }) => Promise<void>;
 }
 
 const EVENT: Record<OrderAction, string> = {
+  RX_APPROVE: 'order.rx_approved',
+  RX_REJECT: 'order.rx_rejected',
   ACCEPT: 'order.accepted',
   REJECT: 'order.rejected',
   START_PREPARING: 'order.preparing',
@@ -76,6 +80,22 @@ export class OrderStateService {
       const eventData: Record<string, unknown> = {};
 
       switch (action) {
+        case 'RX_APPROVE': {
+          // The store's 3-minute accept window starts now, not when the customer uploaded the prescription.
+          const travel = order.fulfilmentType === 'DELIVERY' ? travelMinutes(order.deliveryDistanceKm) : 0;
+          Object.assign(data, { placedAt: now, promisedDeliveryAt: addMin(now, order.store.defaultPrepMinutes + travel) });
+          eventData.acceptBy = addMin(now, 3).toISOString();
+          eventData.itemCount = order.items.filter((i) => !i.isOutOfStock).reduce((n, i) => n + i.qty, 0);
+          eventData.grandTotal = order.grandTotal;
+          break;
+        }
+        case 'RX_REJECT':
+        case 'REJECT':
+          Object.assign(data, { rejectReason: opts.reason, cancelledAt: now, cancelledBy: actor.kind === 'SYSTEM' ? 'SYSTEM' : 'STORE' });
+          await this.release(tx, order, actor);
+          Object.assign(data, await this.refundStub(tx, order, opts.reason!, actor.kind === 'SYSTEM' ? 'SYSTEM' : 'STORE'));
+          if (order.deliveryTask) await this.setTask(tx, order.deliveryTask, 'CANCELLED', {}, actor.kind);
+          break;
         case 'ACCEPT': {
           const busy = order.store.openState === 'BUSY';
           const prep = opts.prepMinutes ?? order.store.defaultPrepMinutes + (busy ? 10 : 0);
@@ -85,12 +105,6 @@ export class OrderStateService {
           if (order.fulfilmentType === 'DELIVERY' && !order.deliveryTask) await this.createTask(tx, order, addMin(now, prep));
           break;
         }
-        case 'REJECT':
-          Object.assign(data, { rejectReason: opts.reason, cancelledAt: now, cancelledBy: actor.kind === 'SYSTEM' ? 'SYSTEM' : 'STORE' });
-          await this.release(tx, order, actor);
-          Object.assign(data, await this.refundStub(tx, order, opts.reason!, actor.kind === 'SYSTEM' ? 'SYSTEM' : 'STORE'));
-          if (order.deliveryTask) await this.setTask(tx, order.deliveryTask, 'CANCELLED', {}, actor.kind);
-          break;
         case 'START_PREPARING':
           data.preparingAt = now;
           break;
@@ -138,6 +152,7 @@ export class OrderStateService {
           break;
       }
 
+      if (opts.inTx) await opts.inTx(tx, order);
       const updated = await tx.order.update({ where: { id: orderId }, data, select: { id: true, status: true, orderNumber: true } });
       await tx.orderStatusEvent.create({
         data: { orderId, fromState: order.status, toState: to, actorType: actor.kind, actorId: actor.userId, reason: opts.reason ?? null, meta: (opts.meta ?? undefined) as Prisma.InputJsonValue | undefined },

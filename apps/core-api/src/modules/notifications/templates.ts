@@ -45,6 +45,12 @@ export const TEMPLATES: Record<string, Partial<Record<Lang, Copy>> & { EN: Copy 
     HI: (v) => ({ title: `कम स्टॉक: ${v.name}`, body: `${v.available} बचे हैं।` }),
     KN: (v) => ({ title: `ಕಡಿಮೆ ಸ್ಟಾಕ್: ${v.name}`, body: `${v.available} ಉಳಿದಿವೆ.` }),
   },
+  // ---- Partners: pharmacy (no medicine names — health data)
+  RX_REVIEW: {
+    EN: (v) => ({ title: `Prescription to check · ${v.orderNumber}`, body: `${v.items} item(s) · ${rs(v.total)} · review within ${v.minutes} minutes` }),
+    HI: (v) => ({ title: `पर्चा जाँचें · ${v.orderNumber}`, body: `${v.items} आइटम · ${rs(v.total)} · ${v.minutes} मिनट में जाँचें` }),
+    KN: (v) => ({ title: `ಪ್ರಿಸ್ಕ್ರಿಪ್ಷನ್ ಪರಿಶೀಲಿಸಿ · ${v.orderNumber}`, body: `${v.items} ಐಟಂ · ${rs(v.total)} · ${v.minutes} ನಿಮಿಷದಲ್ಲಿ ಪರಿಶೀಲಿಸಿ` }),
+  },
   // ---- Partners: labs (no test names — health data)
   LAB_BOOKING: {
     EN: (v) => ({ title: `New booking ${v.bookingNumber}`, body: `${v.when} · ${v.type === 'HOME' ? 'home collection' : 'walk-in'}${v.rx ? ' · check prescription' : ''}` }),

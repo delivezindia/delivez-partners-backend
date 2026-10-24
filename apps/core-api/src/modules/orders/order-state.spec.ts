@@ -12,6 +12,8 @@ const FULFILMENT: FulfilmentType[] = ['DELIVERY', 'PICKUP'];
 
 // The expected matrix, written out independently of RULES: action → allowed (actor, from) → to.
 const EXPECTED: Record<OrderAction, { to: OrderStatus; allow: Partial<Record<ActorKind, OrderStatus[]>>; only?: FulfilmentType }> = {
+  RX_APPROVE: { to: 'PLACED', allow: { PARTNER: ['AWAITING_RX_REVIEW'] } },
+  RX_REJECT: { to: 'REJECTED', allow: { PARTNER: ['AWAITING_RX_REVIEW'] } },
   ACCEPT: { to: 'ACCEPTED', allow: { PARTNER: ['PLACED'], SYSTEM: ['PLACED'] } },
   REJECT: { to: 'REJECTED', allow: { PARTNER: ['PLACED'], SYSTEM: ['PLACED'] } },
   START_PREPARING: { to: 'PREPARING', allow: { PARTNER: ['ACCEPTED'], SYSTEM: ['ACCEPTED'] } },
@@ -26,9 +28,9 @@ const EXPECTED: Record<OrderAction, { to: OrderStatus; allow: Partial<Record<Act
   CANCEL: {
     to: 'CANCELLED',
     allow: {
-      CUSTOMER: ['PLACED'],
-      ADMIN: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY_SOON', 'READY'],
-      SYSTEM: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY_SOON', 'READY'],
+      CUSTOMER: ['AWAITING_RX_REVIEW', 'PLACED'],
+      ADMIN: ['AWAITING_RX_REVIEW', 'PLACED', 'ACCEPTED', 'PREPARING', 'READY_SOON', 'READY'],
+      SYSTEM: ['AWAITING_RX_REVIEW', 'PLACED', 'ACCEPTED', 'PREPARING', 'READY_SOON', 'READY'],
     },
   },
 };
@@ -38,7 +40,7 @@ describe('order state machine', () => {
     assert.deepEqual(Object.keys(RULES).sort(), Object.keys(EXPECTED).sort());
   });
 
-  // Exhaustive: every action × state × actor × fulfilment (12 × 16 × 5 × 2 = 1,920 cases).
+  // Exhaustive: every action × state × actor × fulfilment (14 × 16 × 5 × 2 = 2,240 cases).
   for (const action of Object.keys(EXPECTED) as OrderAction[]) {
     it(`${action}: allowed and disallowed moves`, () => {
       const exp = EXPECTED[action];
@@ -70,6 +72,17 @@ describe('order state machine', () => {
     assert.equal((checkTransition('REJECT', placed, 'PARTNER', '  ') as { code: string }).code, 'REASON_REQUIRED');
     assert.equal((checkTransition('CANCEL', placed, 'ADMIN') as { code: string }).code, 'REASON_REQUIRED');
     assert.equal(checkTransition('ACCEPT', placed, 'PARTNER').ok, true);
+    const rx = { status: 'AWAITING_RX_REVIEW' as OrderStatus, fulfilmentType: 'DELIVERY' as FulfilmentType };
+    assert.equal((checkTransition('RX_REJECT', rx, 'PARTNER') as { code: string }).code, 'REASON_REQUIRED');
+    assert.equal(checkTransition('RX_APPROVE', rx, 'PARTNER').ok, true);
+  });
+
+  it('a prescription order reaches the store only after the pharmacist approves it', () => {
+    const rx = { status: 'AWAITING_RX_REVIEW' as OrderStatus, fulfilmentType: 'PICKUP' as FulfilmentType };
+    assert.equal(checkTransition('ACCEPT', rx, 'PARTNER').ok, false);
+    assert.equal(checkTransition('ACCEPT', rx, 'SYSTEM').ok, false);
+    assert.equal(checkTransition('RX_APPROVE', rx, 'SYSTEM').ok, false);
+    assert.equal(checkTransition('CANCEL', rx, 'SYSTEM', 'not reviewed in time').ok, true);
   });
 
   it('customers can only cancel before the store accepts', () => {

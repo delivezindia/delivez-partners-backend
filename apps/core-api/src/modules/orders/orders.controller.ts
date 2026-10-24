@@ -30,7 +30,7 @@ const REJECT_TEXT: Record<(typeof REJECT_REASONS)[number], string> = {
 };
 
 const listQuery = z.object({
-  tab: z.enum(['NEW', 'PREPARING', 'READY', 'DONE', 'CANCELLED', 'ALL']).default('NEW'),
+  tab: z.enum(['RX', 'NEW', 'PREPARING', 'READY', 'DONE', 'CANCELLED', 'ALL']).default('NEW'),
   cursor: z.string().datetime().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
@@ -51,13 +51,17 @@ const createSchema = z
     paymentMode: z.enum(['COD', 'UPI']),
     prepMinutes: z.number().int().min(5).max(120).optional(),
     note: z.string().trim().max(300).optional(),
+    /** Pharmacy: a pharmacist has checked the customer’s paper prescription for Schedule H/H1 items. */
+    rxSeenByStore: z.boolean().optional(),
   })
   .refine((v) => v.fulfilmentType === 'PICKUP' || !!v.address, { message: 'Add the delivery address', path: ['address'] });
 const simulateSchema = z.object({
   count: z.number().int().min(1).max(5).default(1),
   fulfilment: z.enum(['DELIVERY', 'PICKUP', 'ANY']).default('ANY'),
   payment: z.enum(['COD', 'UPI', 'ANY']).default('ANY'),
-  placedSecondsAgo: z.number().int().min(0).max(600).default(0),
+  placedSecondsAgo: z.number().int().min(0).max(1200).default(0),
+  /** Pharmacy: YES adds a prescription medicine and a sample prescription (needs a pharmacist on duty). */
+  rx: z.enum(['YES', 'NO']).default('NO'),
 });
 
 const partnerActor = (u: AuthUser, s: StoreAccess, r: ApiRequest): OrderActor => ({ kind: 'PARTNER', userId: u.userId, role: s.role, correlationId: r.correlationId });
@@ -91,7 +95,7 @@ export class PartnerOrdersController {
   @PartnerRoles(...CREATE)
   create(@Param('storeId', ParseUUIDPipe) storeId: string, @Body(new ZodValidationPipe(createSchema)) b: z.infer<typeof createSchema>, @CurrentUser() u: AuthUser, @CurrentStore() s: StoreAccess, @Req() r: ApiRequest) {
     return this.orders.create(
-      { storeId, channel: 'PARTNER_MANUAL', fulfilmentType: b.fulfilmentType, customer: b.customer, items: b.items, paymentMode: b.paymentMode, address: b.address, note: b.note, startAccepted: { prepMinutes: b.prepMinutes } },
+      { storeId, channel: 'PARTNER_MANUAL', fulfilmentType: b.fulfilmentType, customer: b.customer, items: b.items, paymentMode: b.paymentMode, address: b.address, note: b.note, rxSeenByStore: b.rxSeenByStore, startAccepted: { prepMinutes: b.prepMinutes } },
       partnerActor(u, s, r),
     );
   }

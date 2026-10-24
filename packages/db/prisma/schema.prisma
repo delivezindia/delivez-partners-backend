@@ -679,6 +679,9 @@ model Pharmacist {
   certificateDocId String?
   isActive         Boolean   @default(true)
   consentAt        DateTime? // "prescriptions will be verified before dispatch"
+  // Manual duty switch that beats the weekly shifts until it expires (end of that IST day).
+  dutyOverride      Boolean?  // true = on duty now, false = off duty now
+  dutyOverrideUntil DateTime?
   createdAt        DateTime  @default(now())
 
   shifts  PharmacistShift[]

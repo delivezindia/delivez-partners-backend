@@ -51,7 +51,7 @@ export class DispatchService {
         ...scope,
         ...(q.before ? { placedAt: { lt: new Date(q.before) } } : {}),
         ...(q.storeId ? { storeId: q.storeId } : {}),
-        ...(q.status === 'ACTIVE' ? { status: { in: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY_SOON', 'READY', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'] } } : q.status ? { status: q.status as never } : {}),
+        ...(q.status === 'ACTIVE' ? { status: { in: ['AWAITING_RX_REVIEW', 'PLACED', 'ACCEPTED', 'PREPARING', 'READY_SOON', 'READY', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'] } } : q.status ? { status: q.status as never } : {}),
         ...(q.q ? { orderNumber: { contains: q.q.toUpperCase() } } : {}),
       },
       orderBy: { placedAt: 'desc' },
