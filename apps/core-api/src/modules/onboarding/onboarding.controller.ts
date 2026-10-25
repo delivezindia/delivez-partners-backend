@@ -44,6 +44,17 @@ const documentSchema = z.object({
   documentNumber: z.string().trim().max(40).optional(),
   issuedAt: z.coerce.date().optional(),
   expiresAt: z.coerce.date().optional(),
+  /** What the partner's browser read off the file (digital PDF text or OCR) — a hint for the reviewer. */
+  reading: z
+    .object({
+      method: z.enum(['pdf-text', 'ocr']),
+      documentNumber: z.string().trim().max(40).nullable(),
+      issuedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+      expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+      confidence: z.enum(['HIGH', 'LOW', 'NONE']),
+      engineConfidence: z.number().min(0).max(100).nullable(),
+    })
+    .optional(),
 });
 
 const bankSchema = z

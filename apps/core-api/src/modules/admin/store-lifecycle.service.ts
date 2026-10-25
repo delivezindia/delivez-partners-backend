@@ -56,13 +56,15 @@ export class StoreLifecycleService {
 
     if (!store.cityId || store.lat == null || !store.addressLine1) problems.push('Store location is incomplete');
     if (target === 'LIVE') {
-      if (readiness.score < 80) problems.push(`Readiness is ${readiness.score}; 80 is needed to go LIVE`);
+      if (!readiness) problems.push('This store has no onboarding record');
+      else if (readiness.score < 80) problems.push(`Readiness is ${readiness.score}; 80 is needed to go LIVE`);
       const unverified = required.filter((t) => latest.get(t) !== 'VERIFIED');
       if (unverified.length) problems.push(`Verify ${unverified.map(docLabel).join(', ')}`);
     } else {
       if (store.vertical === 'PHARMACY') problems.push('Pharmacies cannot soft-launch; verify licences and approve as LIVE');
       if (store.vertical === 'DIAGNOSTICS') problems.push('Labs cannot soft-launch; verify NABL and registrations and approve as LIVE');
-      if (readiness.score < 60) problems.push(`Readiness is ${readiness.score}; 60 is needed for LIMITED`);
+      if (!readiness) problems.push('This store has no onboarding record');
+      else if (readiness.score < 60) problems.push(`Readiness is ${readiness.score}; 60 is needed for LIMITED`);
       const missing = required.filter((t) => !latest.has(t) || ['REJECTED', 'EXPIRED'].includes(latest.get(t)!));
       if (missing.length) problems.push(`Partner must upload ${missing.map(docLabel).join(', ')}`);
     }

@@ -6,7 +6,14 @@ import { haversineKm, pointInPolygon } from '../../common/geo';
 
 export interface GeocodeResult {
   label: string;
+  /** Street + area on one line (single-line address fields). */
   line1: string;
+  /** House / building number and road. */
+  street: string | null;
+  /** Neighbourhood / locality. */
+  area: string | null;
+  /** A named place at or next to the pin (shop, building, temple…), to use as the landmark. */
+  landmark: string | null;
   pincode: string | null;
   city: string | null;
   state: string | null;
@@ -128,6 +135,7 @@ export class GeoService {
 
 interface NominatimPlace {
   display_name: string;
+  name?: string;
   lat: string;
   lon: string;
   address?: Record<string, string>;
@@ -135,10 +143,16 @@ interface NominatimPlace {
 
 function toResult(p: NominatimPlace): GeocodeResult {
   const a = p.address ?? {};
-  const line1 = [a.house_number, a.road ?? a.pedestrian, a.neighbourhood ?? a.suburb].filter(Boolean).join(', ');
+  const street = [a.house_number, a.road ?? a.pedestrian].filter(Boolean).join(', ') || null;
+  const area = a.neighbourhood ?? a.suburb ?? a.quarter ?? a.city_district ?? null;
+  const line1 = [street, area].filter(Boolean).join(', ');
+  const named = p.name?.trim() || a.amenity || a.shop || a.building || a.tourism || a.office || null;
   return {
     label: p.display_name,
     line1: line1 || p.display_name.split(',').slice(0, 2).join(','),
+    street,
+    area,
+    landmark: named && named !== a.road ? named : null,
     pincode: a.postcode?.replace(/\s/g, '') ?? null,
     city: a.city ?? a.town ?? a.state_district ?? null,
     state: a.state ?? null,

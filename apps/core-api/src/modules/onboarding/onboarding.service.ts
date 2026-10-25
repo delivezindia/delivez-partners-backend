@@ -458,8 +458,10 @@ export class OnboardingService {
   }
 
   /** Recomputes and stores the readiness score (after steps, documents, bank changes). */
-  async refreshReadiness(storeId: string): Promise<Readiness> {
+  async refreshReadiness(storeId: string): Promise<Readiness | null> {
     const store = await this.loadStore(storeId);
+    // Stores created outside the onboarding flow (seeded / migrated) have no session to score.
+    if (!store.onboarding) return null;
     const readiness = await this.readinessFor(store);
     await this.prisma.store.update({ where: { id: storeId }, data: { readinessScore: readiness.score } });
     if (store.onboarding) {

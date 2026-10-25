@@ -9,6 +9,7 @@ import { StorageService } from '../files/storage.service';
 import { optionalDocuments, requiredDocuments } from '../onboarding/flows';
 import { OnboardingService } from '../onboarding/onboarding.service';
 import { docLabel } from '../onboarding/readiness';
+import { readingView } from '../onboarding/doc-reading';
 import type { AdminContext } from './admin.guard';
 import { assertCityScope, StoreLifecycleService } from './store-lifecycle.service';
 
@@ -146,6 +147,7 @@ export class AdminService {
         documentNumber: d.documentNumber,
         issuedAt: d.issuedAt,
         expiresAt: d.expiresAt,
+        reading: readingView(d.ocrData),
         fileHash: d.fileHash,
         rejectionReason: d.rejectionReason,
         reviewedBy: d.reviewedBy?.user.fullName ?? null,
@@ -205,6 +207,7 @@ export class AdminService {
       superseded: !newest.has(d.id),
       documentNumber: d.documentNumber,
       expiresAt: d.expiresAt,
+      reading: readingView(d.ocrData),
       createdAt: d.createdAt,
       viewUrl: this.storage.signedReadUrl(d.fileUrl),
       contentType: d.fileUrl.endsWith('.pdf') ? 'application/pdf' : 'image',
@@ -404,7 +407,7 @@ export class AdminService {
         partnerAccount: { select: { legalName: true } },
         documents: {
           orderBy: { createdAt: 'desc' },
-          select: { id: true, type: true, status: true, createdAt: true, fileUrl: true, documentNumber: true, expiresAt: true, rejectionReason: true, reviewedAt: true },
+          select: { id: true, type: true, status: true, createdAt: true, fileUrl: true, documentNumber: true, expiresAt: true, rejectionReason: true, reviewedAt: true, ocrData: true },
         },
       },
     });
@@ -433,6 +436,7 @@ export class AdminService {
                 status: d.status,
                 createdAt: d.createdAt,
                 documentNumber: d.documentNumber,
+                reading: readingView(d.ocrData),
                 expiresAt: d.expiresAt,
                 expiringSoon: d.status === 'VERIFIED' && !!d.expiresAt && d.expiresAt.getTime() <= soon,
                 rejectionReason: d.rejectionReason,

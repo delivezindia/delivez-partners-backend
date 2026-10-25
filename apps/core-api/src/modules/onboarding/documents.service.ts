@@ -9,6 +9,7 @@ import { optionalDocuments, requiredDocuments } from './flows';
 import type { Actor } from './onboarding.service';
 import { OnboardingService } from './onboarding.service';
 import { docLabel } from './readiness';
+import { readingRecord, type DocReadingInput } from './doc-reading';
 
 export interface RegisterDocumentInput {
   type: DocumentType;
@@ -16,6 +17,7 @@ export interface RegisterDocumentInput {
   documentNumber?: string;
   issuedAt?: Date;
   expiresAt?: Date;
+  reading?: DocReadingInput;
 }
 
 // Partner documents (plan §5.2): upload never blocks the flow; compliance verifies in Admin (Step 7).
@@ -34,7 +36,7 @@ export class DocumentsService {
   }
 
   async register(storeId: string, input: RegisterDocumentInput, actor: Actor & { channel: OnboardingChannel }) {
-    const store = await this.prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { storeType: true, partnerAccountId: true, status: true } });
+    const store = await this.prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { storeType: true, partnerAccountId: true, status: true, partnerAccount: { select: { gstin: true } } } });
     const allowed = new Set<DocumentType>([...requiredDocuments(store.storeType), ...optionalDocuments(store.storeType), 'OTHER']);
     if (!allowed.has(input.type)) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'DOCUMENT_TYPE_NOT_ALLOWED', `${docLabel(input.type)} is not needed for this store type`);
@@ -62,7 +64,7 @@ export class DocumentsService {
           fileHash,
           status: 'PENDING',
           uploadedVia: actor.channel,
-          ocrData: { provider: 'none', note: 'OCR provider not configured yet' } as Prisma.InputJsonValue,
+          ocrData: readingRecord(input.type, input.reading, { documentNumber: input.documentNumber, expiresAt: input.expiresAt }, store.partnerAccount.gstin) as Prisma.InputJsonValue,
         },
       });
       await this.audit.log({ actorUserId: actor.userId, actorType: 'USER', entity: 'PartnerDocument', entityId: created.id, action: 'CREATE', after: { type: created.type }, ip: actor.ip }, tx);
