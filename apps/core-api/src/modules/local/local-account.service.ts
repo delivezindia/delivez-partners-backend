@@ -40,6 +40,10 @@ export class LocalAccountService {
   }
 
   async updateMe(userId: string, input: { fullName?: string; email?: string | null; whatsappOptIn?: boolean; marketingOptIn?: boolean }) {
+    if (input.email) {
+      const taken = await this.prisma.user.findFirst({ where: { email: { equals: input.email, mode: 'insensitive' }, id: { not: userId } }, select: { id: true } });
+      if (taken) throw new ApiError(HttpStatus.CONFLICT, 'EMAIL_TAKEN', 'This email is already used by another Delivez account');
+    }
     await this.prisma.user.update({ where: { id: userId }, data: { fullName: input.fullName, email: input.email } });
     const c = await this.customer(userId);
     await this.prisma.customer.update({ where: { id: c.id }, data: { whatsappOptIn: input.whatsappOptIn, marketingOptIn: input.marketingOptIn } });
