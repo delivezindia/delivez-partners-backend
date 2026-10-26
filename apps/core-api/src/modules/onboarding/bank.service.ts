@@ -8,6 +8,7 @@ import { EventBus } from '../../events/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { Actor } from './onboarding.service';
 import { OnboardingService } from './onboarding.service';
+import { IfscService } from './ifsc.service';
 
 export interface BankInput {
   accountHolderName: string;
@@ -32,6 +33,7 @@ export class BankService {
     private readonly events: EventBus,
     private readonly audit: AuditService,
     private readonly onboarding: OnboardingService,
+    private readonly ifsc: IfscService,
   ) {}
 
   async save(storeId: string, input: BankInput, actor: Actor) {
@@ -51,6 +53,9 @@ export class BankService {
     if (input.accountNumber && !input.ifsc) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'IFSC_REQUIRED', 'Enter the IFSC code for this account');
     }
+    // A real branch, and its bank name when the partner left it blank.
+    const branch = input.accountNumber && input.ifsc ? await this.ifsc.check(input.ifsc) : null;
+    const bankName = input.bankName?.trim() || branch?.bank || undefined;
 
     const owner = await this.prisma.user.findUnique({ where: { id: actor.userId }, select: { fullName: true } });
     let status: BankVerificationStatus = 'UNVERIFIED';
@@ -80,7 +85,7 @@ export class BankService {
           accountNumberEnc: input.accountNumber ? encryptSecret(input.accountNumber) : null,
           accountNumberLast4: input.accountNumber?.slice(-4) ?? null,
           ifsc: input.ifsc ?? null,
-          bankName: input.bankName ?? null,
+          bankName: bankName ?? null,
           upiId: input.upiId ?? null,
           verificationStatus: status,
           pennyDropRef,

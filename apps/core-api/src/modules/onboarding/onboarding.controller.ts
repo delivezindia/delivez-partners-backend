@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Req, UseGuards, HttpStatus } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import type { OnboardingChannel } from '@delivez/db';
@@ -10,6 +10,8 @@ import { BankService } from './bank.service';
 import { DocumentsService } from './documents.service';
 import { STEP_SCHEMAS, type StepKey } from './flows';
 import { OnboardingService, type Actor } from './onboarding.service';
+import { IfscService } from './ifsc.service';
+import { ApiError } from '../../common/api-exception.filter';
 
 const STORE_TYPES = [
   'RESTAURANT', 'CLOUD_KITCHEN', 'SUPERMARKET', 'KIRANA', 'GROCERY', 'PHARMACY_RETAIL', 'PHARMACY_CHAIN', 'PHARMACY_HOSPITAL',
@@ -97,6 +99,7 @@ export class OnboardingController {
     private readonly onboarding: OnboardingService,
     private readonly documents: DocumentsService,
     private readonly bank: BankService,
+    private readonly ifsc: IfscService,
   ) {}
 
   /** Start a new store registration (also used by owners adding another outlet). */
@@ -169,6 +172,15 @@ export class OnboardingController {
   }
 
   // Bank --------------------------------------------------------------
+
+  /** Bank & branch for an IFSC, so the form can show it (and fill the bank name). */
+  @Get('stores/:storeId/ifsc/:code')
+  @PartnerRoles('OWNER', 'MANAGER', 'ACCOUNTANT')
+  async ifscLookup(@Param('storeId', ParseUUIDPipe) _storeId: string, @Param('code') code: string) {
+    const b = await this.ifsc.lookup(code);
+    if (!b) throw new ApiError(HttpStatus.NOT_FOUND, 'IFSC_NOT_FOUND', 'No bank branch has this IFSC');
+    return b;
+  }
 
   @Put('stores/:storeId/bank-account')
   @PartnerRoles('OWNER')
