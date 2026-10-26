@@ -17,6 +17,7 @@ import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
 import { DigestsModule } from './modules/digests/digests.module';
 import { SupportModule } from './modules/support/support.module';
 import { AdminReportsModule } from './modules/admin-reports/admin-reports.module';
+import { LocalModule } from './modules/local/local.module';
 import { PartnersModule } from './modules/partners/partners.module';
 import { FilesModule } from './modules/files/files.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
@@ -49,6 +50,7 @@ import { SystemModule } from './modules/system/system.module';
     DigestsModule,
     SupportModule,
     AdminReportsModule,
+    LocalModule,
     StoresModule,
     CatalogModule,
     NotificationsModule,

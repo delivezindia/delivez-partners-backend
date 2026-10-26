@@ -44,6 +44,8 @@ export class AuthService {
 
       // Staff invites (plan §4.3) are created inactive and activate on the invitee's next Partners login.
       // Members an owner deactivated keep acceptedAt, so they are not reactivated here.
+      // Every Local (customer app) login has a customer profile for orders, carts and addresses.
+      if (app === 'LOCAL') await tx.customer.upsert({ where: { userId: user.id }, update: {}, create: { userId: user.id } });
       if (app === 'PARTNERS') {
         await tx.partnerMember.updateMany({ where: { userId: user.id, isActive: false, acceptedAt: null }, data: { isActive: true, acceptedAt: new Date() } });
       }

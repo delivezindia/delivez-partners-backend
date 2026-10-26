@@ -23,6 +23,9 @@ export interface AddressInput {
   pincode: string;
   lat: number;
   lng: number;
+  /** Someone else receives the order (customer app saved address). Defaults to the customer. */
+  contactName?: string;
+  contactPhone?: string;
 }
 export interface CreateOrderInput {
   storeId: string;
@@ -32,6 +35,8 @@ export interface CreateOrderInput {
   items: ItemInput[];
   paymentMode: PaymentMode;
   address?: AddressInput;
+  /** The customer's saved address the order goes to (customer app). */
+  addressId?: string;
   note?: string;
   isTestOrder?: boolean;
   /** Store-created orders start accepted (prep time optional — store default if omitted). */
@@ -57,7 +62,7 @@ export const TAB_STATES: Record<Exclude<OrderTab, 'ALL'>, OrderStatus[]> = {
 export const ACCEPT_TIMEOUT_SECONDS = 180;
 /** A prescription not reviewed in this time is cancelled and refunded (the customer is waiting). */
 export const RX_REVIEW_MINUTES = 15;
-const DELIVERY_FEE = 3000; // paise — flat until pricing lands
+export const DELIVERY_FEE = 3000; // paise — flat until pricing lands
 const OTP_ATTEMPTS = 5;
 
 const ORDER_INCLUDE = {
@@ -148,7 +153,8 @@ export class OrdersService {
           fulfilmentType: input.fulfilmentType,
           status: awaitingRx ? 'AWAITING_RX_REVIEW' : 'PLACED',
           prescriptionId,
-          deliveryAddress: input.address ? { ...input.address, contactName: input.customer.name ?? null, contactPhone: customer.phone } : undefined,
+          deliveryAddress: input.address ? { ...input.address, contactName: input.address.contactName ?? input.customer.name ?? null, contactPhone: input.address.contactPhone ?? customer.phone } : undefined,
+          addressId: input.addressId,
           deliveryDistanceKm: distanceKm,
           itemsSubtotal,
           deliveryFee,
