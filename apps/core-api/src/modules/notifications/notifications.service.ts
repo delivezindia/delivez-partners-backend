@@ -115,6 +115,8 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       case 'order.placed':
         if (byPartner) return; // the store typed it in itself
         return this.toStore(e, storeId!, ORDER_ROLES, { app: 'PARTNERS', code: 'ORDER_PLACED', vars: { orderNumber: d.orderNumber, items: d.itemCount, total: d.grandTotal }, url: orders(), tag: `order-${d.orderId}`, urgent: true });
+      case 'order.return_created':
+        return this.toStore(e, storeId!, ORDER_ROLES, { app: 'PARTNERS', code: 'RETURN_COMING', vars: { orderNumber: d.orderNumber, items: (d.items as { qty: number }[] | undefined)?.reduce((n, i) => n + i.qty, 0) ?? 0, amount: d.amount }, url: orders(d.orderNumber), tag: `return-${d.orderId}`, urgent: true });
       case 'order.rx_submitted':
         return this.toStore(e, storeId!, REMIND_TO, { app: 'PARTNERS', code: 'RX_REVIEW', vars: { orderNumber: d.orderNumber, items: d.itemCount, total: d.grandTotal, minutes: d.reviewMinutes }, url: `/stores/${storeId}/prescriptions`, tag: `order-${d.orderId}`, urgent: true });
       case 'order.rx_approved':

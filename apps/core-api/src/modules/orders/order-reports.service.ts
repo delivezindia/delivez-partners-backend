@@ -19,6 +19,9 @@ export const istDate = (d: Date) => new Date(d.getTime() + IST_MS).toISOString()
 const istTime = (d: Date | null) => (d ? new Date(d.getTime() + IST_MS).toISOString().slice(0, 16).replace('T', ' ') : '');
 
 const rs = (p: number) => (p / 100).toFixed(2);
+/** What the customer kept: units handed back at the door are off the bill (the order total already dropped). */
+const kept = <T extends { qty: number; returnedQty: number; unitPrice: number; lineTotal: number }>(items: T[]) =>
+  items.filter((i) => i.qty > i.returnedQty).map((i) => ({ ...i, qty: i.qty - i.returnedQty, lineTotal: i.lineTotal - i.unitPrice * i.returnedQty }));
 /** CSV cell: quotes when needed, and defuses spreadsheet formulas (=, +, -, @). */
 const cell = (v: unknown) => {
   const s = v == null ? '' : String(v);
@@ -155,7 +158,7 @@ export class OrderReportsService {
     const id = await this.taxIdentity(storeId);
     const s = id.store;
     const bill = gstBill(
-      o.items.map((i) => ({ name: `${i.productName}${i.variantName ? ` (${i.variantName})` : ''}`, hsn: i.product.hsnCode, qty: i.qty, ratePct: i.taxRatePct, total: i.lineTotal })),
+      kept(o.items).map((i) => ({ name: `${i.productName}${i.variantName ? ` (${i.variantName})` : ''}`, hsn: i.product.hsnCode, qty: i.qty, ratePct: i.taxRatePct, total: i.lineTotal })),
       o.packagingFee,
       !!id.gstin,
     );
@@ -205,7 +208,7 @@ export class OrderReportsService {
     ];
     const totals = new Map<number, { taxable: number; cgst: number; sgst: number; total: number; bills: Set<string> }>();
     for (const o of orders) {
-      const b = gstBill(o.items.map((i) => ({ name: i.productName, hsn: i.product.hsnCode, qty: i.qty, ratePct: i.taxRatePct, total: i.lineTotal })), o.packagingFee, !!id.gstin);
+      const b = gstBill(kept(o.items).map((i) => ({ name: i.productName, hsn: i.product.hsnCode, qty: i.qty, ratePct: i.taxRatePct, total: i.lineTotal })), o.packagingFee, !!id.gstin);
       for (const r of b.byRate) {
         rows.push([o.orderNumber, istTime(o.placedAt), r.ratePct, rs(r.taxable), rs(r.cgst), rs(r.sgst), rs(r.total)]);
         const t = totals.get(r.ratePct) ?? { taxable: 0, cgst: 0, sgst: 0, total: 0, bills: new Set<string>() };

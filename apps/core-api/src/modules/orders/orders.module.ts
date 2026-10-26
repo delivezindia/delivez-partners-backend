@@ -11,11 +11,12 @@ import { OrderReportsController } from './order-reports.controller';
 import { OrderReportsService } from './order-reports.service';
 import { SimulatorService } from './simulator.service';
 import { SubstitutionsService } from './substitutions.service';
+import { ReturnsService } from './returns.service';
 
 @Module({
   imports: [PartnersModule, FilesModule],
   controllers: [PartnerOrdersController, DevOrdersController, AdminOrdersController, OrderReportsController],
-  providers: [OrderStateService, OrdersService, DispatchService, SimulatorService, SubstitutionsService, OrderJobsScheduler, OrderReportsService, AdminGuard],
+  providers: [OrderStateService, OrdersService, DispatchService, SimulatorService, SubstitutionsService, ReturnsService, OrderJobsScheduler, OrderReportsService, AdminGuard],
   exports: [OrderStateService, OrdersService, OrderReportsService],
 })
 export class OrdersModule {}

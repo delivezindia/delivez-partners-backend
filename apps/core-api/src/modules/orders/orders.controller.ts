@@ -15,6 +15,8 @@ import { OrderStateService, type OrderActor } from './order-state.service';
 import { OrdersService, type OrderTab } from './orders.service';
 import { SimulatorService } from './simulator.service';
 import { SubstitutionsService } from './substitutions.service';
+import { ReturnsService } from './returns.service';
+import { RETURN_REASONS } from './returns-rules';
 
 // Who can do what on the order screen (plan §4.2 role model).
 const VIEW = ['OWNER', 'MANAGER', 'KITCHEN_LEAD', 'COUNTER_STAFF', 'PHARMACIST'] as const;
@@ -45,6 +47,8 @@ const pickupSchema = z.object({ otp: z.string().regex(/^\d{4}$/, 'Enter the 4-di
 const unavailableSchema = z.object({ switchOff: z.boolean().default(false) });
 const substituteSchema = z.object({ productId: z.string().uuid(), variantId: z.string().uuid().optional(), qty: z.number().int().min(1).max(50), note: z.string().trim().max(200).optional() });
 const respondSchema = z.object({ accept: z.boolean() });
+const returnSchema = z.object({ items: z.array(z.object({ itemId: z.string().uuid(), qty: z.number().int().min(1).max(50), reason: z.enum(RETURN_REASONS) })).min(1).max(50), note: z.string().trim().max(200).optional() });
+const receiveSchema = z.object({ restock: z.boolean() });
 const itemSchema = z.object({ productId: z.string().uuid(), qty: z.number().int().min(1).max(50), variantId: z.string().uuid().optional(), addonIds: z.array(z.string().uuid()).max(20).optional() });
 const createSchema = z
   .object({
@@ -80,6 +84,7 @@ export class PartnerOrdersController {
     private readonly orders: OrdersService,
     private readonly state: OrderStateService,
     private readonly substitutions: SubstitutionsService,
+    private readonly returns: ReturnsService,
   ) {}
 
   @Get()
@@ -196,6 +201,15 @@ export class PartnerOrdersController {
   substitute(@Param('storeId', ParseUUIDPipe) storeId: string, @Param('orderId', ParseUUIDPipe) orderId: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body(new ZodValidationPipe(substituteSchema)) b: z.infer<typeof substituteSchema>, @CurrentUser() u: AuthUser, @CurrentStore() s: StoreAccess, @Req() r: ApiRequest) {
     return this.substitutions.propose(storeId, orderId, itemId, b, partnerActor(u, s, r));
   }
+
+  /** Returned items are back at the shop: on the shelf again, or damaged. */
+  @Post(':orderId/returns/:returnId/receive')
+  @HttpCode(200)
+  @RequireIdempotency()
+  @PartnerRoles(...COUNTER)
+  receive(@Param('storeId', ParseUUIDPipe) storeId: string, @Param('orderId', ParseUUIDPipe) orderId: string, @Param('returnId', ParseUUIDPipe) returnId: string, @Body(new ZodValidationPipe(receiveSchema)) b: z.infer<typeof receiveSchema>, @CurrentUser() u: AuthUser, @CurrentStore() s: StoreAccess, @Req() r: ApiRequest) {
+    return this.returns.receive(storeId, orderId, returnId, b.restock, partnerActor(u, s, r));
+  }
 }
 
 /** Dev order simulator — never available in production. */
@@ -246,7 +260,29 @@ const ORDER_OPS = [...ROLES.OPERATE_STORES, 'SUPPORT' as const];
 @UseGuards(AdminGuard)
 @Controller('admin')
 export class AdminOrdersController {
-  constructor(private readonly dispatch: DispatchService) {}
+  constructor(
+    private readonly dispatch: DispatchService,
+    private readonly returns: ReturnsService,
+  ) {}
+
+  /** Playing the rider at the door (until the rider app exists): items the customer handed back. */
+  @Post('orders/:id/returns')
+  @AdminRoles(...ROLES.OPERATE_STORES)
+  async doorReturn(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(returnSchema)) b: z.infer<typeof returnSchema>, @CurrentAdmin() a: AdminContext, @Req() r: ApiRequest) {
+    await this.dispatch.adminDetail(id, a.cityIds); // city scope
+    await this.returns.create(id, b.items, b.note, adminActor(a, r));
+    return this.dispatch.adminDetail(id, a.cityIds);
+  }
+
+  /** "Customer is happy" — the rider leaves. */
+  @Post('orders/:id/return-window/close')
+  @HttpCode(200)
+  @AdminRoles(...ROLES.OPERATE_STORES)
+  async closeWindow(@Param('id', ParseUUIDPipe) id: string, @CurrentAdmin() a: AdminContext, @Req() r: ApiRequest) {
+    await this.dispatch.adminDetail(id, a.cityIds);
+    await this.returns.close(id, adminActor(a, r));
+    return this.dispatch.adminDetail(id, a.cityIds);
+  }
 
   @Get('orders')
   list(@Query(new ZodValidationPipe(adminListQuery)) q: z.infer<typeof adminListQuery>, @CurrentAdmin() a: AdminContext) {

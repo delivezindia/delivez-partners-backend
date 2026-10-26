@@ -4,6 +4,7 @@ import { ApiError } from '../../common/api-exception.filter';
 import { EventBus } from '../../events/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { checkTransition, type ActorKind, type OrderAction } from './order-state';
+import { RETURN_WINDOW_MINUTES, returnsAllowed } from './returns-rules';
 
 export interface OrderActor {
   kind: ActorKind;
@@ -140,6 +141,11 @@ export class OrderStateService {
           break;
         case 'DELIVER':
           Object.assign(data, { deliveredAt: now, ...(order.paymentMode === 'COD' ? { paymentStatus: 'COD_COLLECTED' as const } : {}) });
+          // Grocery / local stores: the rider waits while the customer checks the items.
+          if (returnsAllowed(order.vertical, order.fulfilmentType)) {
+            data.returnWindowEndsAt = addMin(now, RETURN_WINDOW_MINUTES);
+            eventData.returnWindowEndsAt = addMin(now, RETURN_WINDOW_MINUTES).toISOString();
+          }
           if (order.deliveryTask) await this.setTask(tx, order.deliveryTask, 'DELIVERED', { deliveredAt: now, codCollected: order.paymentMode === 'COD' }, actor.kind);
           break;
         case 'FAIL_DELIVERY':

@@ -1186,6 +1186,10 @@ model Order {
   completedAt        DateTime?
   cancelledAt        DateTime?
   cancelledBy        String? // CUSTOMER | STORE | ADMIN | SYSTEM
+  // Doorstep check after delivery: the rider waits while the customer checks the items (grocery / local stores).
+  returnWindowEndsAt   DateTime?
+  returnWindowClosedAt DateTime?
+  returnWindowOutcome  String? // NO_RETURN (customer happy) | RETURNED | EXPIRED (time ran out)
   cancelReason       String?
   rejectReason       String?
 
@@ -1215,6 +1219,7 @@ model Order {
   settlementLines  SettlementLine[]
   tickets          SupportTicket[]
   substitutions    OrderSubstitution[]
+  returns          OrderReturn[]
   aiPredictions    AiPrediction[]
   couponRedemption CouponRedemption?
 
@@ -1241,6 +1246,7 @@ model OrderItem {
   rxItemId             String?
   substitutedProductId String?
   isOutOfStock         Boolean @default(false) // store marked unavailable during acceptance
+  returnedQty          Int     @default(0) // handed back at the door
 
   @@index([orderId])
   @@map("order_items")
@@ -1277,6 +1283,46 @@ model OrderSubstitution {
   @@index([orderId])
   @@index([status, respondBy])
   @@map("order_substitutions")
+}
+
+enum ReturnReason {
+  DAMAGED
+  WRONG_ITEM
+  EXPIRED
+  POOR_QUALITY
+  MISSING // never delivered — refunded, nothing to bring back
+}
+
+enum ReturnStatus {
+  WITH_RIDER // on its way back to the shop
+  RECEIVED // the shop has it back
+  NOT_APPLICABLE // MISSING: nothing to bring back
+}
+
+/// An item handed back to the rider at the door during the return window, refunded to the customer.
+model OrderReturn {
+  id               String       @id @default(uuid())
+  orderId          String
+  order            Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId      String
+  productId        String
+  productName      String
+  qty              Int
+  amount           Int // paise refunded
+  reason           ReturnReason
+  note             String?
+  status           ReturnStatus @default(WITH_RIDER)
+  refundMethod     String // ONLINE (back to the payment) | CASH_AT_DOOR (rider hands cash back)
+  createdByType    String // RIDER | ADMIN
+  createdByUserId  String?
+  restocked        Boolean? // set when received: back on the shelf, or written off as damaged
+  receivedAt       DateTime?
+  receivedByUserId String?
+  createdAt        DateTime     @default(now())
+
+  @@index([orderId])
+  @@index([status])
+  @@map("order_returns")
 }
 
 model OrderStatusEvent {

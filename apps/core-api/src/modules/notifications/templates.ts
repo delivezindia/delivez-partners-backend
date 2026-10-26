@@ -45,6 +45,11 @@ export const TEMPLATES: Record<string, Partial<Record<Lang, Copy>> & { EN: Copy 
     HI: (v) => ({ title: `कम स्टॉक: ${v.name}`, body: `${v.available} बचे हैं।` }),
     KN: (v) => ({ title: `ಕಡಿಮೆ ಸ್ಟಾಕ್: ${v.name}`, body: `${v.available} ಉಳಿದಿವೆ.` }),
   },
+  RETURN_COMING: {
+    EN: (v) => ({ title: `Items coming back · ${v.orderNumber}`, body: `The customer returned ${v.items} item(s) at the door (${rs(v.amount)} refunded). Check them when the rider arrives.` }),
+    HI: (v) => ({ title: `आइटम वापस आ रहे हैं · ${v.orderNumber}`, body: `ग्राहक ने ${v.items} आइटम लौटाए (${rs(v.amount)} वापस)। राइडर के आने पर जाँचें।` }),
+    KN: (v) => ({ title: `ಐಟಂಗಳು ಹಿಂತಿರುಗುತ್ತಿವೆ · ${v.orderNumber}`, body: `ಗ್ರಾಹಕರು ${v.items} ಐಟಂ ಹಿಂತಿರುಗಿಸಿದ್ದಾರೆ (${rs(v.amount)} ಮರುಪಾವತಿ). ರೈಡರ್ ಬಂದಾಗ ಪರಿಶೀಲಿಸಿ.` }),
+  },
   // ---- Partners: pharmacy (no medicine names — health data)
   RX_REVIEW: {
     EN: (v) => ({ title: `Prescription to check · ${v.orderNumber}`, body: `${v.items} item(s) · ${rs(v.total)} · review within ${v.minutes} minutes` }),

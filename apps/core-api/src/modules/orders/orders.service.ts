@@ -66,6 +66,7 @@ const ORDER_INCLUDE = {
   deliveryTask: { include: { rider: { include: { user: { select: { fullName: true, phone: true } } } } } },
   prescription: { include: { reviewedBy: { select: { name: true, registrationNo: true } } } },
   substitutions: { orderBy: { createdAt: 'asc' } },
+  returns: { orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.OrderInclude;
 type OrderRow = Prisma.OrderGetPayload<{ include: typeof ORDER_INCLUDE }>;
 
@@ -430,7 +431,7 @@ export class OrdersService {
       deliveryArea: addr ? [addr.landmark, addr.pincode].filter(Boolean).join(' · ') || null : null,
       distanceKm: o.deliveryDistanceKm,
       note: o.customerNote,
-      items: o.items.map((i) => ({ id: i.id, name: i.productName, variant: i.variantName, addons: (i.addons ?? []) as { name: string; price: number }[], qty: i.qty, unitPrice: i.unitPrice, lineTotal: i.lineTotal, isRx: i.isRx, unavailable: i.isOutOfStock })),
+      items: o.items.map((i) => ({ id: i.id, name: i.productName, variant: i.variantName, addons: (i.addons ?? []) as { name: string; price: number }[], qty: i.qty, unitPrice: i.unitPrice, lineTotal: i.lineTotal, isRx: i.isRx, unavailable: i.isOutOfStock, returnedQty: i.returnedQty })),
       totals: { items: o.itemsSubtotal, delivery: o.deliveryFee, packaging: o.packagingFee, discount: o.discountAmount, grandTotal: o.grandTotal },
       payment: { mode: o.paymentMode, status: o.paymentStatus, collectCash: o.paymentMode === 'COD' && o.paymentStatus === 'COD_PENDING' && o.fulfilmentType === 'PICKUP' ? o.grandTotal : 0 },
       prepMinutes: o.promisedPrepMinutes,
@@ -440,6 +441,8 @@ export class OrdersService {
       times: { placedAt: o.placedAt, acceptedAt: o.acceptedAt, preparingAt: o.preparingAt, readySoonAt: o.readySoonAt, readyAt: o.readyAt, pickedUpAt: o.pickedUpAt, deliveredAt: o.deliveredAt, completedAt: o.completedAt, cancelledAt: o.cancelledAt },
       rejectReason: o.rejectReason,
       cancelReason: o.cancelReason,
+      returnWindow: o.returnWindowEndsAt ? { endsAt: o.returnWindowEndsAt, closedAt: o.returnWindowClosedAt, outcome: o.returnWindowOutcome, open: !o.returnWindowClosedAt && o.returnWindowEndsAt > new Date() } : null,
+      returns: o.returns.map((r) => ({ id: r.id, itemId: r.orderItemId, name: r.productName, qty: r.qty, amount: r.amount, reason: r.reason, note: r.note, status: r.status, refundMethod: r.refundMethod, restocked: r.restocked, receivedAt: r.receivedAt, createdAt: r.createdAt })),
       substitutions: o.substitutions.map((s) => ({ id: s.id, itemId: s.orderItemId, name: s.productName, variant: s.variantName, qty: s.qty, lineTotal: s.lineTotal, status: s.status, respondBy: s.respondBy, respondedAt: s.respondedAt })),
       rxReviewBy: o.status === 'AWAITING_RX_REVIEW' ? new Date(o.createdAt.getTime() + RX_REVIEW_MINUTES * 60_000) : null,
       rx: o.prescription

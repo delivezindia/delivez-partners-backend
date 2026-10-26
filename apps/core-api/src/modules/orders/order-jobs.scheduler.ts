@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderStateService } from './order-state.service';
 import { SubstitutionsService } from './substitutions.service';
+import { ReturnsService } from './returns.service';
 import { ACCEPT_TIMEOUT_SECONDS, RX_REVIEW_MINUTES } from './orders.service';
 
 const TICK_MS = 5_000;
@@ -23,6 +24,7 @@ export class OrderJobsScheduler implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly state: OrderStateService,
     private readonly substitutions: SubstitutionsService,
+    private readonly returns: ReturnsService,
   ) {}
 
   onModuleInit() {
@@ -65,6 +67,7 @@ export class OrderJobsScheduler implements OnModuleInit, OnModuleDestroy {
           .catch((e) => this.logger.debug(`rx timeout skip ${o.id}: ${(e as Error).message}`));
       }
       await this.substitutions.expireDue(now);
+      await this.returns.expireDue(now);
       const toPrepare = await this.prisma.order.findMany({
         where: { status: 'ACCEPTED', acceptedAt: { lt: new Date(now.getTime() - AUTO_PREPARING_SECONDS * 1000) } },
         select: { id: true },
