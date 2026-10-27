@@ -178,6 +178,7 @@ enum AdminRole {
   SUPPORT
   SALES_AGENT
   AUDITOR
+  ACCOUNT_MANAGER // owns a book of stores: health, churn risk, follow-ups (mobile view)
 }
 
 model AdminUser {
@@ -193,6 +194,9 @@ model AdminUser {
   adminActions      AdminAction[]
   referrals         OnboardingSession[] @relation("salesAgent")
   settlementsPaid   Settlement[]        @relation("settlementApprover")
+  accountStores     Store[]             @relation("accountManager")
+  amTasks           AmTask[]
+  amActivities      AmActivity[]
 
   @@map("admin_users")
 }
@@ -481,6 +485,14 @@ model Store {
   catalogSyncs    WhatsAppCatalogSync[]
   dailyStats      StoreDailyStat[]
 
+  // Account manager who looks after this store (AdminUser with role ACCOUNT_MANAGER).
+  accountManagerId String?
+  accountManager   AdminUser?   @relation("accountManager", fields: [accountManagerId], references: [id])
+  amTasks          AmTask[]
+  amActivities     AmActivity[]
+  amIssues         AmIssue[]
+
+  @@index([accountManagerId])
   @@index([cityId, vertical, status, openState])
   @@index([geohash])
   @@map("stores")
@@ -1192,6 +1204,12 @@ model Order {
   returnWindowOutcome  String? // NO_RETURN (customer happy) | RETURNED | EXPIRED (time ran out)
   cancelReason       String?
   rejectReason       String?
+  // Order SLA (apps/core-api/src/modules/orders/sla.ts): why it ended, whose fault, and who gets what.
+  cancelCode         String? // CancelCode, e.g. ACCEPT_TIMEOUT, OPS_NO_RIDER, FAIL_CUSTOMER_UNAVAILABLE
+  cancelFault        String? // CUSTOMER | STORE | PLATFORM | RIDER | NO_FAULT
+  cancelStage        String? // BEFORE_ACCEPT | PREPARING | READY | PICKED_UP
+  storeCompensation  Int     @default(0) // paise Delivez owes the shop for goods it cannot sell (cooked food)
+  customerDue        Int     @default(0) // COD: paise the customer should have paid but didn't (recorded, not charged)
 
   // security
   handoverOtp String? // rider ↔ store (also encoded as QR)
@@ -1291,6 +1309,7 @@ enum ReturnReason {
   EXPIRED
   POOR_QUALITY
   MISSING // never delivered — refunded, nothing to bring back
+  UNDELIVERED // delivery failed after pickup — the rider brings the goods back to the shop
 }
 
 enum ReturnStatus {
@@ -1557,6 +1576,8 @@ model Rider {
   lastLng     Float?
   lastSeenAt  DateTime?
   avgRating   Float       @default(0)
+  /// Paused by ops (no new orders). Offline without this = went offline unexpectedly.
+  pausedAt    DateTime?
   createdAt   DateTime    @default(now())
 
   tasks   DeliveryTask[]
@@ -2239,4 +2260,92 @@ model LabReportAccess {
 
   @@index([reportId, createdAt])
   @@map("lab_report_accesses")
+}
+
+// ---------------------------------------------------------------------
+// ACCOUNT MANAGERS (store health, churn risk, follow-ups)
+// ---------------------------------------------------------------------
+
+/// A follow-up an account manager owes a store (call, visit, test order).
+model AmTask {
+  id        String    @id @default(uuid())
+  adminId   String
+  admin     AdminUser @relation(fields: [adminId], references: [id])
+  storeId   String
+  store     Store     @relation(fields: [storeId], references: [id])
+  kind      String // CALL | VISIT | TEST_ORDER | FOLLOW_UP
+  title     String
+  priority  String    @default("MEDIUM") // HIGH | MEDIUM | LOW
+  dueAt     DateTime
+  doneAt    DateTime?
+  source    String    @default("MANUAL") // MANUAL | SUGGESTION | ALERT
+  createdAt DateTime  @default(now())
+
+  @@index([adminId, doneAt, dueAt])
+  @@map("am_tasks")
+}
+
+/// Communication log: every call, WhatsApp, note, visit and change an AM made for a store.
+model AmActivity {
+  id        String    @id @default(uuid())
+  adminId   String
+  admin     AdminUser @relation(fields: [adminId], references: [id])
+  storeId   String
+  store     Store     @relation(fields: [storeId], references: [id])
+  kind      String // CALL | WHATSAPP | NOTE | VISIT | TEST_ORDER | PREP_CHANGED | TASK_DONE | ISSUE_RESOLVED | ISSUE_ESCALATED
+  note      String?
+  meta      Json?
+  clientId  String?   @unique // set by the app for notes written offline, so a retry can't log twice
+  createdAt DateTime  @default(now())
+
+  @@index([storeId, createdAt])
+  @@map("am_activities")
+}
+
+/// Something wrong at a store that needs a person: raised by SLA breaches, complaints and the health check.
+model AmIssue {
+  id                String    @id @default(uuid())
+  storeId           String
+  store             Store     @relation(fields: [storeId], references: [id])
+  orderId           String?
+  kind              String // PREP_DELAY | RIDER_DELAY | COMPLAINT | ORDER_DROP | CHURN_RISK
+  title             String
+  status            String    @default("OPEN") // OPEN | ESCALATED | RESOLVED
+  owner             String    @default("AM") // AM | OPS
+  dueAt             DateTime // SLA timer: handle it by then
+  dedupeKey         String    @unique
+  note              String?
+  resolvedAt        DateTime?
+  resolvedByAdminId String?
+  createdAt         DateTime  @default(now())
+
+  @@index([storeId, status])
+  @@map("am_issues")
+}
+
+/// An SLA alert on the live ops board (LIKELY or BREACHED). Every alert is its own row, kept for the audit log.
+model OpsAlert {
+  id               String    @id @default(uuid())
+  orderId          String
+  storeId          String
+  cityId           String?
+  kind             String // ACCEPT | RX_REVIEW | PREP | NO_RIDER | RIDER_TO_STORE | DELIVERY | DOOR
+  level            String // highest reached: LIKELY | BREACHED
+  reason           String
+  detectedAt       DateTime  @default(now())
+  breachedAt       DateTime?
+  acknowledgedAt   DateTime?
+  acknowledgedById String? // AdminUser id
+  acknowledgedBy   String? // name, kept for the log
+  action           String? // CALLED_STORE | CALLED_RIDER | PREP_UPDATED | ESCALATED | RIDER_SWAPPED | APOLOGY_SENT
+  actionAt         DateTime?
+  resolvedAt       DateTime?
+  resolvedBy       String? // name, or System when the order got back on track / ended
+  history          Json      @default("[]") // [{ at, type, level?, by?, action? }]
+
+  // One OPEN alert per order + kind: partial unique index in the migration (WHERE "resolvedAt" IS NULL).
+  @@index([orderId, kind])
+  @@index([resolvedAt, cityId])
+  @@index([detectedAt])
+  @@map("ops_alerts")
 }

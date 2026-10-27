@@ -127,7 +127,7 @@ export class SubstitutionsService {
       await this.state.note(tx, o, 'order.substitution_declined', actor, expired ? `No answer — ${item.productName} removed` : `Customer declined ${sub.productName}`, { substitutionId: sub.id, itemId: item.id, expired, refund: o.paymentStatus === 'CAPTURED' ? item.lineTotal : 0 });
     });
     if (cancelOrder) {
-      await this.state.transition(orderId, 'CANCEL', { kind: 'SYSTEM' }, { reason: 'The only item ran out and the substitute was not accepted', meta: { auto: 'SUBSTITUTE_DECLINED' } });
+      await this.state.transition(orderId, 'CANCEL', { kind: 'SYSTEM' }, { reason: 'The only item ran out and the substitute was not accepted', code: 'STORE_ITEMS_UNAVAILABLE', meta: { auto: 'SUBSTITUTE_DECLINED' } });
     }
     return this.orders.detailById(orderId);
   }

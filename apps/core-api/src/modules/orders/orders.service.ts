@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../files/storage.service';
 import { pharmacistsOnDuty } from '../pharmacy/duty';
 import { ACTIVE_STATES } from './order-state';
+import { CANCEL_TEXT, isCancelCode } from './sla';
 import { OrderStateService, travelMinutes, type OrderActor } from './order-state.service';
 
 export interface ItemInput {
@@ -72,6 +73,7 @@ const ORDER_INCLUDE = {
   prescription: { include: { reviewedBy: { select: { name: true, registrationNo: true } } } },
   substitutions: { orderBy: { createdAt: 'asc' } },
   returns: { orderBy: { createdAt: 'asc' } },
+  refunds: { select: { amount: true } },
 } satisfies Prisma.OrderInclude;
 type OrderRow = Prisma.OrderGetPayload<{ include: typeof ORDER_INCLUDE }>;
 
@@ -139,7 +141,8 @@ export class OrdersService {
       }
       const itemsSubtotal = priced.reduce((s, i) => s + i.lineTotal, 0);
       const deliveryFee = input.fulfilmentType === 'DELIVERY' ? DELIVERY_FEE : 0;
-      const packagingFee = store.vertical === 'EAT' ? store.packagingFee : 0;
+      // App orders carry no packaging fee (customer policy); the shop's own counter / phone orders may.
+      const packagingFee = store.vertical === 'EAT' && input.channel !== 'LOCAL_WEB' ? store.packagingFee : 0;
       const grandTotal = itemsSubtotal + deliveryFee + packagingFee;
       const paid = input.paymentMode !== 'COD';
 
@@ -447,6 +450,10 @@ export class OrdersService {
       times: { placedAt: o.placedAt, acceptedAt: o.acceptedAt, preparingAt: o.preparingAt, readySoonAt: o.readySoonAt, readyAt: o.readyAt, pickedUpAt: o.pickedUpAt, deliveredAt: o.deliveredAt, completedAt: o.completedAt, cancelledAt: o.cancelledAt },
       rejectReason: o.rejectReason,
       cancelReason: o.cancelReason,
+      // Order SLA: why it ended, whose fault, and what it means for the shop (Delivez pays for cooked food it couldn't sell).
+      cancellation: o.cancelCode
+        ? { code: o.cancelCode, text: isCancelCode(o.cancelCode) ? CANCEL_TEXT[o.cancelCode] : o.cancelCode, fault: o.cancelFault, stage: o.cancelStage, storeCompensation: o.storeCompensation, customerDue: o.customerDue, refunded: o.refunds.reduce((n, r) => n + r.amount, 0) }
+        : null,
       returnWindow: o.returnWindowEndsAt ? { endsAt: o.returnWindowEndsAt, closedAt: o.returnWindowClosedAt, outcome: o.returnWindowOutcome, open: !o.returnWindowClosedAt && o.returnWindowEndsAt > new Date() } : null,
       returns: o.returns.map((r) => ({ id: r.id, itemId: r.orderItemId, name: r.productName, qty: r.qty, amount: r.amount, reason: r.reason, note: r.note, status: r.status, refundMethod: r.refundMethod, restocked: r.restocked, receivedAt: r.receivedAt, createdAt: r.createdAt })),
       substitutions: o.substitutions.map((s) => ({ id: s.id, itemId: s.orderItemId, name: s.productName, variant: s.variantName, qty: s.qty, lineTotal: s.lineTotal, status: s.status, respondBy: s.respondBy, respondedAt: s.respondedAt })),

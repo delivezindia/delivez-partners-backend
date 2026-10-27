@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Delivez Local Workflow</title>
+<meta name="description" content="How the Delivez Local customer app works, end to end: screens, journeys, rules, API calls and order states." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --red: #d40511; --red-soft: #fdecee; --yellow: #ffcc00; --yellow-soft: #fff7d1;
+    --green: #14803a; --green-soft: #e8f6ec; --blue: #1a56db; --blue-soft: #eaf1ff;
+    --orange: #fb923c; --amber: #facc15;
+    --ink: #000; --ink-2: #4a4a47; --ink-3: #7c7c77; --line: #e3e3de; --soft: #f5f5f2;
+    --bg: #ffffff; --card: #ffffff; --code-bg: #f5f5f2; --hero-from: #fff7d1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #f4f4f0; --ink-2: #c9c9c3; --ink-3: #9a9a94; --line: #34342f; --soft: #1d1d1b;
+      --bg: #121211; --card: #1a1a18; --code-bg: #232320; --hero-from: #2a2614;
+      --red-soft: #3a1416; --yellow-soft: #2e2912; --green-soft: #13291b; --blue-soft: #15203a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #f4f4f0; --ink-2: #c9c9c3; --ink-3: #9a9a94; --line: #34342f; --soft: #1d1d1b;
+    --bg: #121211; --card: #1a1a18; --code-bg: #232320; --hero-from: #2a2614;
+    --red-soft: #3a1416; --yellow-soft: #2e2912; --green-soft: #13291b; --blue-soft: #15203a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 'Archivo', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+  h1, h2, h3 { font-stretch: 74%; font-weight: 900; letter-spacing: -0.01em; margin: 0; }
+  h1 { font-size: clamp(38px, 6vw, 64px); line-height: 0.98; }
+  h2 { font-size: clamp(28px, 4vw, 40px); line-height: 1; }
+  h3 { font-size: 22px; line-height: 1.1; }
+  p { margin: 0; }
+  a { color: inherit; }
+  code { font: 12.5px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; background: var(--code-bg); padding: 1px 6px; border-radius: 6px; overflow-wrap: anywhere; }
+
+  header.top { position: sticky; top: 0; z-index: 10; background: var(--yellow); border-bottom: 3px solid var(--red); color: #000; }
+  header.top .in { max-width: 1180px; margin: 0 auto; padding: 0 16px; height: 60px; display: flex; align-items: center; gap: 14px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .brand b { color: var(--red); font-size: 28px; font-weight: 900; font-style: italic; font-stretch: 72%; }
+  .pill { border: 1.5px solid #000; background: #fff; border-radius: 6px; padding: 1px 8px; font-size: 12px; font-weight: 700; }
+  nav.toc { margin-left: auto; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+  nav.toc a { white-space: nowrap; text-decoration: none; font-weight: 600; font-size: 14px; padding: 8px 9px; border-radius: 8px; }
+  nav.toc a:hover { color: var(--red); }
+  .theme { border: 0; background: rgba(0,0,0,.06); border-radius: 8px; padding: 7px 10px; font: inherit; font-weight: 700; cursor: pointer; color: #000; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px; }
+  section.block { padding: 56px 0; border-bottom: 1px solid var(--line); }
+  section.block.alt { background: var(--soft); }
+  .eyebrow { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+  .intro { color: var(--ink-2); font-size: 17px; max-width: 760px; margin-top: 10px; }
+
+  .hero { background: linear-gradient(135deg, var(--hero-from), var(--bg)); border-bottom: 1px solid var(--line); padding: 52px 0 44px; }
+  .badge { display: inline-flex; border: 1px solid #e6b800; background: var(--yellow-soft); border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; }
+  .hero h1 { margin-top: 16px; }
+  .hero h1 span { color: var(--red); }
+  .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 32px; }
+  .facts div b { display: block; color: var(--red); font-size: 26px; font-weight: 800; }
+  .facts div span { color: var(--ink-2); font-size: 14px; }
+
+  .grid { display: grid; gap: 14px; }
+  .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; min-width: 0; }
+  .card h3 { font-size: 19px; }
+  .card p, .card li { color: var(--ink-2); font-size: 14px; }
+  .card ul { margin: 8px 0 0; padding-left: 18px; }
+  .card li { margin: 3px 0; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 800; border-radius: 999px; padding: 2px 8px; margin-right: 4px; }
+  .t-pub { background: var(--green-soft); color: var(--green); }
+  .t-auth { background: var(--blue-soft); color: var(--blue); }
+  .t-dev { background: var(--yellow-soft); color: var(--ink); border: 1px solid #e6b800; }
+  .t-soon { background: var(--red-soft); color: var(--red); }
+
+  /* Screen map */
+  .map { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 26px; }
+  .screen { border: 1.5px solid var(--line); border-radius: 14px; padding: 12px; background: var(--card); position: relative; }
+  .screen .route { font: 12px ui-monospace, Consolas, monospace; color: var(--red); font-weight: 700; }
+  .screen b { display: block; margin-top: 2px; }
+  .screen span { display: block; font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+  .screen.key { border-color: var(--ink); }
+
+  /* Journey steps */
+  .journey { margin-top: 26px; display: grid; gap: 0; }
+  .step { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; position: relative; padding-bottom: 22px; }
+  .step::before { content: ''; position: absolute; left: 21px; top: 44px; bottom: 0; width: 2px; background: var(--line); }
+  .step:last-child::before { display: none; }
+  .num { width: 44px; height: 44px; border-radius: 50%; background: #000; color: var(--yellow); display: grid; place-items: center; font-weight: 900; font-size: 18px; }
+  :root[data-theme="dark"] .num { background: var(--yellow); color: #000; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .num { background: var(--yellow); color: #000; } }
+  .step .body { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; min-width: 0; }
+  .step .body h3 { font-size: 20px; }
+  .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+  .cols h4 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+  .cols p, .cols li { font-size: 14px; color: var(--ink-2); }
+  .cols ul { margin: 0; padding-left: 18px; }
+
+  /* Lifecycle */
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 22px; }
+  .st { border-radius: 10px; padding: 8px 12px; font-weight: 800; font-size: 13px; border: 1.5px solid var(--line); background: var(--card); }
+  .st small { display: block; font-weight: 600; color: var(--ink-3); font-size: 11px; }
+  .arrow { color: var(--ink-3); font-weight: 900; }
+  .st.g { border-color: var(--green); } .st.r { border-color: var(--red); } .st.y { border-color: var(--amber); } .st.o { border-color: var(--orange); } .st.b { border-color: var(--blue); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--card); margin-top: 22px; }
+
+  .seq { margin-top: 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); padding: 12px; overflow-x: auto; }
+  .seq svg { display: block; min-width: 760px; width: 100%; height: auto; color: var(--ink); }
+
+  .note { margin-top: 18px; display: flex; gap: 10px; background: var(--yellow-soft); border: 1px solid #e6b800; border-radius: 12px; padding: 12px 14px; font-size: 14px; }
+  footer { background: #000; color: #bdbdb6; padding: 30px 0; font-size: 13px; }
+  footer b { color: var(--yellow); font-style: italic; font-stretch: 72%; font-size: 22px; }
+
+  @media (max-width: 900px) {
+    .map { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .g3, .cols { grid-template-columns: minmax(0, 1fr); }
+    .facts { grid-template-columns: repeat(2, 1fr); }
+    nav.toc { display: none; }
+  }
+  @media (max-width: 600px) {
+    .g2, .map { grid-template-columns: minmax(0, 1fr); }
+    .step { grid-template-columns: 34px minmax(0, 1fr); gap: 10px; }
+    .num { width: 34px; height: 34px; font-size: 15px; }
+    .step::before { left: 16px; top: 34px; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="in">
+    <a class="brand" href="#top"><b>DELIVEZ</b><span class="pill">Local</span></a>
+    <nav class="toc" aria-label="Sections">
+      <a href="#screens">Screens</a>
+      <a href="#journey">Journey</a>
+      <a href="#sequence">Order flow</a>
+      <a href="#states">Order states</a>
+      <a href="#rules">Rules</a>
+      <a href="#api">API</a>
+      <a href="#next">Next</a>
+    </nav>
+    <button class="theme" type="button" id="theme" aria-label="Switch light or dark">◐</button>
+  </div>
+</header>
+
+<div class="hero" id="top">
+  <div class="wrap">
+    <span class="badge">Delivez Local · customer app · status as of Oct 2026 (L1 + L2 built)</span>
+    <h1>How the customer app works, <span>end to end.</span></h1>
+    <p class="intro">From the first visit to a delivered order: every screen, what the customer does, what the app and server do, which API is called, and the rules behind each step. Built in <code>apps/local-web</code> (port 5175) with the API in <code>apps/core-api/src/modules/local</code>.</p>
+    <div class="facts">
+      <div><b>10</b><span>screens / routes</span></div>
+      <div><b>13</b><span>customer API endpoints</span></div>
+      <div><b>8</b><span>languages (994 text keys)</span></div>
+      <div><b>Online pay</b><span>UPI, card or net banking — no cash on delivery, no platform or packaging fee</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREENS -->
+<section class="block" id="screens">
+  <div class="wrap">
+    <p class="eyebrow">Screen map</p>
+    <h2>Ten screens</h2>
+    <p class="intro">Browsing is open to everyone. A login is needed only to save addresses, place an order, or see orders. Dark border = the main path to an order.</p>
+    <div class="map">
+      <div class="screen key"><span class="route">/ (no location)</span><b>Landing page</b><span>Hero with "Use my current location" / "Find my address on the map", categories, how it works, medicines &amp; labs, FAQ, footer.</span></div>
+      <div class="screen key"><span class="route">/ (location set)</span><b>Shops near you</b><span>Search, category chips, shop list (open first, then delivering, then nearest).</span></div>
+      <div class="screen key"><span class="route">/s/:slug</span><b>Shop page</b><span>Cover, rating, ETA, fee, categories, items, veg-only, options sheet, add to cart.</span></div>
+      <div class="screen key"><span class="route">/cart</span><b>Cart &amp; checkout</b><span>Lines, note, delivery address, bill, blockers, "Place order".</span></div>
+      <div class="screen"><span class="route">/login · /signup</span><b>Log in / Sign up</b><span>Phone + 6-digit OTP. Sign up also takes name, email, terms.</span></div>
+      <div class="screen"><span class="route">/account?welcome=1</span><b>Welcome step</b><span>New number from "Log in" → asked for a name once.</span></div>
+      <div class="screen"><span class="route">/addresses/new · /:id/edit</span><b>Address editor</b><span>Map pin + autofill; house / flat, landmark, PIN, label, someone-else contact.</span></div>
+      <div class="screen key"><span class="route">/orders/:id</span><b>Order status</b><span>Progress steps, door / counter code, rider, bill, cancel, call shop.</span></div>
+      <div class="screen"><span class="route">/orders</span><b>My orders</b><span>History, newest first, status chip per order.</span></div>
+      <div class="screen"><span class="route">/account</span><b>Account</b><span>Name, email, WhatsApp updates, saved addresses, language, log out.</span></div>
+    </div>
+    <div class="note"><span>💾</span><span>Kept on the device: <code>dz-local-auth</code> (session + language), <code>dz-local-location</code> (where to deliver), <code>dz-local-cart</code> (basket). Everything else lives on the server.</span></div>
+  </div>
+</section>
+
+<!-- JOURNEY -->
+<section class="block alt" id="journey">
+  <div class="wrap">
+    <p class="eyebrow">Customer journey</p>
+    <h2>From first visit to delivered</h2>
+    <p class="intro">Each step lists what the customer sees, what happens behind the scenes, and the API involved.</p>
+    <div class="journey">
+
+      <div class="step"><div class="num">1</div><div class="body">
+        <h3>Open the site → choose a location</h3>
+        <div class="cols">
+          <div><h4>Customer</h4><ul><li>Sees the landing page.</li><li>Taps <b>Use my current location</b>, or <b>Find my address on the map</b>, or a saved address (if signed in).</li><li>A category tile picked first is remembered (<code>?v=GROCERY</code>) and opens after the location is set.</li></ul></div>
+          <div><h4>App / server</h4><ul><li>Browser GPS → lat/lng rounded to 6 decimals.</li><li>Signed in: area name from reverse geocoding; guests see "Current location".</li><li>Saved as <code>dz-local-location</code>; the page switches to the shop list.</li></ul></div>
+          <div><h4>API</h4><p><code>GET /v1/geo/reverse</code> <span class="tag t-auth">login</span><br />Map search uses Google Places in the browser (or OpenStreetMap fallback).</p></div>
+        </div>
+      </div></div>
+
+      <div class="step"><div class="num">2</div><div class="body">
+        <h3>Browse shops near you</h3>
+        <div class="cols">
+          <div><h4>Customer</h4><ul><li>Searches ("basmati", "biryani") or filters by Food, Groceries, Medicines, Lab tests, Local shops.</li><li>Sees ETA, distance, ₹30 fee, rating, Busy / Closed · opens at.</li></ul></div>
+          <div><h4>App / server</h4><ul><li>Only LIVE / LIMITED shops.</li><li>Only shops that deliver to the address (shop's radius; LIMITED: max 2 km). Home delivery only — no self-pickup.</li><li>Search matches shop name, cuisines and product names.</li><li>Labs show "Book a slot" (no fee, no ETA).</li></ul></div>
+          <div><h4>API</h4><p><code>GET /v1/local/stores?lat&amp;lng&amp;vertical&amp;q</code> <span class="tag t-pub">public</span></p></div>
+        </div>
+      </div></div>
+
+      <div class="step"><div class="num">3</div><div class="body">
+        <h3>Open a shop → add to cart</h3>
+        <div class="cols">
+          <div><h4>Customer</h4><ul><li>Scrolls categories, searches in the shop, "Veg only".</li><li>Taps <b>ADD</b>; dishes with sizes / add-ons open the options sheet ("Pick 1", "Up to 3").</li><li>Uses − / + on the item; green cart bar shows "3 items · ₹398".</li></ul></div>
+          <div><h4>App / server</h4><ul><li>Cart holds <b>one shop</b>; adding from another asks "Start a new cart?".</li><li>Same item with different options = separate line.</li><li>"Only N left" shown for 1–5 in stock; never the real count. Qty capped by stock and per-order limit (default 20).</li></ul></div>
+          <div><h4>API</h4><p><code>GET /v1/local/stores/:idOrSlug?lat&amp;lng</code> <span class="tag t-pub">public</span><br />Cart itself is on the device.</p></div>
+        </div>
+      </div></div>
+
+      <div class="step"><div class="num">4</div><div class="body">
+        <h3>Go to cart → log in or sign up</h3>
+        <div class="cols">
+          <div><h4>Customer</h4><ul><li>Guest sees "Log in to place your order" (cart is kept).</li><li><b>Log in</b>: mobile → OTP. <b>Sign up</b>: name, mobile, optional email, tick terms → OTP → "Verify and create account".</li></ul></div>
+          <div><h4>App / server</h4><ul><li>OTP verify with <code>app: 'LOCAL'</code> creates the user (if new) and a <b>customer</b> row.</li><li>Sign up saves name / email / WhatsApp opt-in; an existing number keeps its name; an email used elsewhere is skipped (409 <code>EMAIL_TAKEN</code>).</li><li>New number via "Log in" → welcome step asks for the name.</li><li>Returns to the page in <code>?next</code> (here <code>/cart</code>).</li></ul></div>
+          <div><h4>API</h4><p><code>POST /v1/auth/otp/request</code><br /><code>POST /v1/auth/otp/verify</code><br /><code>PATCH /v1/local/me</code> <span class="tag t-auth">login</span></p><p style="margin-top:6px"><span class="tag t-dev">dev</span> the code is shown on screen while SMS isn't connected.</p></div>
+        </div>
+      </div></div>
+
+      <div class="step"><div class="num">5</div><div class="body">
+        <h3>Add the delivery address</h3>
+        <div class="cols">
+          <div><h4>Customer</h4><ul><li>Drags the pin to the building entrance.</li><li>Types house / flat; street, landmark, PIN, city, state are filled from the pin.</li><li>Label Home / Work / Other; optional "Someone else will receive it".</li></ul></div>
+          <div><h4>App / server</h4><ul><li>First address becomes the default.</li><li>Pin within 300 m of a saved address → that address is picked automatically.</li><li>Delete is a soft delete (old orders keep it). Max 20 addresses.</li></ul></div>
+          <div><h4>API</h4><p><code>GET / POST /v1/local/me/addresses</code><br /><code>PUT / DELETE /v1/local/me/addresses/:id</code> <span class="tag t-auth">login</span></p></div>
+        </div>
+      </div></div>
+
+      <div class="step"><div class="num">6</div><div class="body">
+        <h3>Checkout → place the order</h3>
+        <div class="cols">
+          <div><h4>Customer</h4><ul><li>Checks the delivery address, adds a note.</li><li>Sees Item total, Delivery fee ₹30, To pay, and “No platform fee · No packaging fee”.</li><li>Picks UPI, card or net banking.</li><li>Taps <b>Pay ₹428 &amp; place order</b>.</li></ul></div>
+          <div><h4>App / server</h4><ul><li>Server re-prices the basket (quote) and lists anything blocking the order (see Rules).</li><li>Place uses one Idempotency-Key per attempt → a double tap makes one order.</li><li>Goes through the same <code>OrdersService.create</code> as every channel: stock is held, 4-digit codes made, shop alerted, auto-accept if the shop has it on.</li></ul></div>
+          <div><h4>API</h4><p><code>POST /v1/local/cart/quote</code><br /><code>POST /v1/local/orders</code> <span class="tag t-auth">login</span> (channel <code>LOCAL_WEB</code>, <code>paymentMode: UPI | CARD | NETBANKING</code>)</p></div>
+        </div>
+      </div></div>
+
+      <div class="step"><div class="num">7</div><div class="body">
+        <h3>Track the order</h3>
+        <div class="cols">
+          <div><h4>Customer</h4><ul><li>"Order placed!" → steps Placed · Preparing · On the way · Delivered.</li><li>Yellow box with the <b>4-digit code</b> for the rider.</li><li>Call rider / call shop; <b>Cancel order</b> while the shop hasn't accepted.</li></ul></div>
+          <div><h4>App / server</h4><ul><li>Screen refreshes every 8 s while the order is active (live socket + push in L3).</li><li>Shop accepts / prepares / marks ready in the Partners app; the rider hands over with the shop's code, then delivers with the customer's code.</li><li>Codes disappear once the order is finished.</li></ul></div>
+          <div><h4>API</h4><p><code>GET /v1/local/orders/:idOrNumber</code><br /><code>POST /v1/local/orders/:id/cancel</code><br /><code>GET /v1/local/orders</code> <span class="tag t-auth">login</span></p></div>
+        </div>
+      </div></div>
+
+      <div class="step"><div class="num">8</div><div class="body">
+        <h3>At the door</h3>
+        <div class="cols">
+          <div><h4>Customer</h4><ul><li>Shares the code with the rider (already paid online).</li><li>Groceries &amp; local shops: checks the items while the rider waits up to 5 minutes; hands back damaged / wrong items.</li></ul></div>
+          <div><h4>App / server</h4><ul><li>Refund straight away to the payment method; bill and GST report reduced; shop told "items coming back".</li><li>Return window closes after 5 min, or when the customer is happy.</li></ul></div>
+          <div><h4>API</h4><p>Rider side today runs from Admin (<code>/v1/admin/orders/:id/returns</code>). Customer-side request comes in <span class="tag t-soon">L4</span>.</p></div>
+        </div>
+      </div></div>
+
+    </div>
+  </div>
+</section>
+
+<!-- SEQUENCE -->
+<section class="block" id="sequence">
+  <div class="wrap">
+    <p class="eyebrow">Order flow</p>
+    <h2>Who talks to whom when an order is placed</h2>
+    <p class="intro">Customer app, API, Partners app (shop) and the rider (played by ops in Admin until the rider app exists).</p>
+    <div class="seq">
+      <svg viewBox="0 0 980 560" role="img" aria-label="Sequence: customer places an order, the API holds stock and alerts the shop, the shop accepts and prepares, the rider picks up with the shop code and delivers with the customer code.">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <g font-family="Archivo, system-ui, sans-serif" font-size="13" fill="currentColor">
+          <g font-weight="800" font-size="14" text-anchor="middle">
+            <rect x="40" y="10" width="160" height="34" rx="9" fill="#ffcc00"/><text x="120" y="32" fill="#000">Customer app</text>
+            <rect x="290" y="10" width="160" height="34" rx="9" fill="#000" stroke="currentColor"/><text x="370" y="32" fill="#ffcc00">Core API</text>
+            <rect x="540" y="10" width="160" height="34" rx="9" fill="#d40511"/><text x="620" y="32" fill="#fff">Partners app (shop)</text>
+            <rect x="790" y="10" width="160" height="34" rx="9" fill="#1a56db"/><text x="870" y="32" fill="#fff">Rider</text>
+          </g>
+          <g stroke="currentColor" stroke-opacity=".25" stroke-dasharray="4 5"><line x1="120" y1="44" x2="120" y2="550"/><line x1="370" y1="44" x2="370" y2="550"/><line x1="620" y1="44" x2="620" y2="550"/><line x1="870" y1="44" x2="870" y2="550"/></g>
+          <g stroke="currentColor" stroke-width="1.6" marker-end="url(#ah)" fill="none">
+            <line x1="120" y1="80" x2="364" y2="80"/>
+            <line x1="370" y1="118" x2="126" y2="118"/>
+            <line x1="120" y1="160" x2="364" y2="160"/>
+            <line x1="370" y1="210" x2="614" y2="210"/>
+            <line x1="370" y1="240" x2="126" y2="240"/>
+            <line x1="620" y1="285" x2="376" y2="285"/>
+            <line x1="620" y1="330" x2="376" y2="330"/>
+            <line x1="370" y1="372" x2="864" y2="372"/>
+            <line x1="870" y1="414" x2="626" y2="414"/>
+            <line x1="870" y1="460" x2="126" y2="460"/>
+            <line x1="870" y1="506" x2="376" y2="506"/>
+          </g>
+          <text x="128" y="74">POST /local/cart/quote</text>
+          <text x="134" y="112">prices · fees · blockers</text>
+          <text x="128" y="154">POST /local/orders (Idempotency-Key)</text>
+          <text x="384" y="180" font-size="12" fill-opacity=".75">hold stock · make 4-digit codes · status PLACED</text>
+          <text x="378" y="204">order.placed → push + ring</text>
+          <text x="134" y="234">order + door code</text>
+          <text x="384" y="279">Accept (prep time) → ACCEPTED</text>
+          <text x="384" y="324">Preparing → Ready soon → Ready</text>
+          <text x="378" y="366">assign rider · pickup task</text>
+          <text x="634" y="408">shop code / QR at counter → PICKED UP</text>
+          <text x="134" y="454">at the door: customer shares their code</text>
+          <text x="384" y="500">DELIVERED (+5-min check for groceries)</text>
+          <text x="128" y="296" font-size="12" fill-opacity=".75">app refreshes</text>
+          <text x="128" y="312" font-size="12" fill-opacity=".75">every 8 s</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- STATES -->
+<section class="block alt" id="states">
+  <div class="wrap">
+    <p class="eyebrow">Order states</p>
+    <h2>What the customer sees at each state</h2>
+    <p class="intro">Server states (left) and the wording on the customer's order screen.</p>
+    <p style="margin-top:20px;font-weight:800">Delivery</p>
+    <div class="flow">
+      <span class="st">PLACED<small>Waiting for the shop to confirm</small></span><span class="arrow">→</span>
+      <span class="st y">ACCEPTED<small>Confirmed by the shop</small></span><span class="arrow">→</span>
+      <span class="st o">PREPARING / READY_SOON<small>Being prepared</small></span><span class="arrow">→</span>
+      <span class="st g">READY<small>Ready</small></span><span class="arrow">→</span>
+      <span class="st b">PICKED_UP / OUT_FOR_DELIVERY<small>On the way</small></span><span class="arrow">→</span>
+      <span class="st b">ARRIVED<small>Rider is at your door</small></span><span class="arrow">→</span>
+      <span class="st g">DELIVERED<small>Delivered</small></span>
+    </div>
+    <p style="margin-top:20px;font-weight:800">Ends early</p>
+    <div class="flow">
+      <span class="st r">CANCELLED<small>by customer while PLACED, or by ops</small></span>
+      <span class="st r">REJECTED<small>The shop couldn't take this order</small></span>
+      <span class="st r">DELIVERY_FAILED</span>
+      <span class="st r">REFUNDED</span>
+      <span class="st">AWAITING_RX_REVIEW<small>pharmacist checking prescription (L4 upload)</small></span>
+    </div>
+    <div class="note"><span>⏱</span><span>The shop has 3 minutes to accept; the Partners app rings, re-alerts the owner at 60 s, and the order is marked missed after that. Customer cancel is free only before the shop accepts.</span></div>
+  </div>
+</section>
+
+<!-- RULES -->
+<section class="block" id="rules">
+  <div class="wrap">
+    <p class="eyebrow">Rules</p>
+    <h2>The rules behind each step</h2>
+    <div class="grid g3" style="margin-top:22px">
+      <div class="card"><h3>Which shops show</h3><ul>
+        <li>Status LIVE or LIMITED only.</li>
+        <li>Delivers if distance ≤ shop's delivery radius; LIMITED shops max 2 km.</li>
+        <li>Sort: open → delivers here → nearest.</li>
+        <li>ETA = prep time (+10 min when Busy) + travel time.</li>
+      </ul></div>
+      <div class="card"><h3>What an item shows</h3><ul>
+        <li>Hidden if deleted or switched off; "Sold out" if paused or no stock.</li>
+        <li>"Only N left" for 1–5 units.</li>
+        <li>Max qty = min(per-order limit or 20, stock left).</li>
+        <li>MRP struck through when higher than price; "% off" from 5%.</li>
+        <li>Rx tag for prescription medicines; sample / fasting / report time for lab tests.</li>
+      </ul></div>
+      <div class="card"><h3>Bill</h3><ul>
+        <li>Items: price + size difference + add-ons, × qty.</li>
+        <li>Delivery fee: flat ₹30.</li>
+        <li>No platform fee and no packaging fee on app orders.</li>
+        <li>Prices include GST; the shop's GST bill is printed from the Partners app.</li>
+      </ul></div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Cart blocker</th><th>When</th><th>Customer sees</th></tr></thead>
+        <tbody>
+          <tr><td><code>STORE_CLOSED</code></td><td>Shop switched to Closed (or outside hours)</td><td>The shop is closed right now.</td></tr>
+          <tr><td><code>OUT_OF_RANGE</code></td><td>Address beyond the delivery radius</td><td>Try another address.</td></tr>
+          <tr><td><code>ADDRESS_REQUIRED</code></td><td>Delivery with no saved address</td><td>Add your delivery address.</td></tr>
+          <tr><td><code>BELOW_MINIMUM</code></td><td>Items total under the shop's minimum</td><td>Add ₹X more to reach the minimum.</td></tr>
+          <tr><td><code>DELIVERY_NOT_OFFERED</code></td><td>Shop doesn't deliver yet</td><td>Pick another shop.</td></tr>
+          <tr><td><code>RX_REQUIRED</code></td><td>Prescription medicine in the cart</td><td>Upload coming soon — remove to order the rest. <span class="tag t-soon">L4</span></td></tr>
+          <tr><td><code>LAB_BOOKING</code></td><td>Lab test in the cart</td><td>Slot booking coming soon. <span class="tag t-soon">L4</span></td></tr>
+          <tr><td><code>ITEMS</code></td><td>An item changed: GONE, UNAVAILABLE, OUT_OF_STOCK, FEW_LEFT, OPTIONS_CHANGED</td><td>Red note on that line ("Only 2 left — reduce the quantity").</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- API -->
+<section class="block alt" id="api">
+  <div class="wrap">
+    <p class="eyebrow">API</p>
+    <h2>Customer endpoints</h2>
+    <p class="intro">All under <code>/v1</code>. <span class="tag t-pub">public</span> = no login. <span class="tag t-auth">login</span> = a token issued for <code>app: 'LOCAL'</code> (partner or admin tokens get 403).</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Method &amp; path</th><th>Access</th><th>Used by</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET /local/stores?lat&amp;lng&amp;vertical&amp;q</code></td><td><span class="tag t-pub">public</span></td><td>Shops near you, search, categories</td></tr>
+          <tr><td><code>GET /local/stores/:idOrSlug?lat&amp;lng</code></td><td><span class="tag t-pub">public</span></td><td>Shop page / menu</td></tr>
+          <tr><td><code>POST /auth/otp/request</code> · <code>POST /auth/otp/verify</code></td><td><span class="tag t-pub">public</span></td><td>Log in / sign up (limit 5 codes per number per hour)</td></tr>
+          <tr><td><code>GET /local/me</code> · <code>PATCH /local/me</code></td><td><span class="tag t-auth">login</span></td><td>Profile, welcome step, sign up</td></tr>
+          <tr><td><code>GET /local/me/addresses</code> · <code>POST</code></td><td><span class="tag t-auth">login</span></td><td>Saved addresses, add address</td></tr>
+          <tr><td><code>PUT /local/me/addresses/:id</code> · <code>DELETE</code></td><td><span class="tag t-auth">login</span></td><td>Edit / remove address</td></tr>
+          <tr><td><code>POST /local/cart/quote</code></td><td><span class="tag t-auth">login</span></td><td>Cart bill and blockers</td></tr>
+          <tr><td><code>POST /local/orders</code></td><td><span class="tag t-auth">login</span> · Idempotency-Key</td><td>Place order (paid online)</td></tr>
+          <tr><td><code>GET /local/orders</code> · <code>GET /local/orders/:idOrNumber</code></td><td><span class="tag t-auth">login</span></td><td>My orders, order status</td></tr>
+          <tr><td><code>POST /local/orders/:id/cancel</code></td><td><span class="tag t-auth">login</span></td><td>Cancel before the shop accepts (else 409 <code>TOO_LATE_TO_CANCEL</code>)</td></tr>
+          <tr><td><code>PUT /me/language</code></td><td><span class="tag t-auth">login</span></td><td>Language follows the account to every device</td></tr>
+          <tr><td><code>GET /geo/reverse</code></td><td><span class="tag t-auth">login</span></td><td>Area name for GPS location (OSM fallback)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="grid g2" style="margin-top:18px">
+      <div class="card"><h3>What the shop sees</h3><p>The order arrives in the Partners app like any other (channel <code>LOCAL_WEB</code>): first name only, masked phone, area + PIN, note, items, totals. The customer's codes are never sent to the shop.</p></div>
+      <div class="card"><h3>What the customer sees</h3><p>Their own orders only (another customer's order → 404). Door code for the rider, shown while the order is active. Rider first name and phone once assigned.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- NEXT -->
+<section class="block" id="next">
+  <div class="wrap">
+    <p class="eyebrow">Roadmap</p>
+    <h2>Built and next</h2>
+    <div class="grid g3" style="margin-top:22px">
+      <div class="card"><h3>✅ L1 · Browse</h3><ul><li>Landing page, location by GPS / map / saved address</li><li>Shops near you, search, categories</li><li>Shop page, options, stock hints</li><li>Phone + OTP, profile, addresses</li></ul></div>
+      <div class="card"><h3>✅ L2 · Cart &amp; orders</h3><ul><li>One-shop cart on the device</li><li>Server quote with blockers</li><li>Paid online (UPI / card / net banking), home delivery only</li><li>Order status, code, cancel, history</li></ul></div>
+      <div class="card"><h3>L3 · Live <span class="tag t-soon">next</span></h3><ul><li>Socket updates instead of 8-second refresh</li><li>Push alerts for the customer</li><li>Re-order from history</li></ul></div>
+      <div class="card"><h3>L4 · Health &amp; doorstep</h3><ul><li>Prescription upload (pharmacist review)</li><li>Answer grocery substitutes in 5 min</li><li>Doorstep return request</li><li>Lab test slot booking</li></ul></div>
+      <div class="card"><h3>L5 · Payments &amp; trust</h3><ul><li>Razorpay online payment and refunds</li><li>Ratings and reviews</li><li>Help / support tickets</li></ul></div>
+      <div class="card"><h3>Tests today</h3><ul><li><code>e2e-local1</code> 27 · <code>e2e-local2</code> 18 (API)</li><li><code>ui-local</code> 24 · <code>ui-auth</code> 14 (phone + desktop browser)</li><li>Existing orders / returns suites still pass</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap" style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:center">
+    <span><b>DELIVEZ</b> · Local customer app workflow</span>
+    <span>Source: <code style="background:#222;color:#ddd">apps/local-web</code> · <code style="background:#222;color:#ddd">apps/core-api/src/modules/local</code></span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement, btn = document.getElementById('theme');
+    try { var saved = localStorage.getItem('dz-workflow-theme'); if (saved) root.setAttribute('data-theme', saved); } catch (e) {}
+    btn.addEventListener('click', function () {
+      var dark = root.getAttribute('data-theme') ? root.getAttribute('data-theme') === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var next = dark ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('dz-workflow-theme', next); } catch (e) {}
+    });
+  })();
+</script>
+</body>
+</html>

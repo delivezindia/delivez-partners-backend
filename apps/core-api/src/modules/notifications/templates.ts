@@ -31,9 +31,19 @@ export const TEMPLATES: Record<string, Partial<Record<Lang, Copy>> & { EN: Copy 
     KN: (v) => ({ title: `ತಪ್ಪಿದ ಆರ್ಡರ್ ${v.orderNumber}`, body: '3 ನಿಮಿಷದಲ್ಲಿ ಸ್ವೀಕರಿಸಲಿಲ್ಲ, ಗ್ರಾಹಕರಿಗೆ ಮರುಪಾವತಿ ಮಾಡಲಾಗಿದೆ.' }),
   },
   ORDER_CANCELLED: {
-    EN: (v) => ({ title: `Order ${v.orderNumber} cancelled`, body: v.reason ? `Reason: ${v.reason}. Stop preparing it.` : 'Stop preparing it.' }),
-    HI: (v) => ({ title: `ऑर्डर ${v.orderNumber} रद्द`, body: 'इसे बनाना बंद करें।' }),
-    KN: (v) => ({ title: `ಆರ್ಡರ್ ${v.orderNumber} ರದ್ದಾಗಿದೆ`, body: 'ಇದನ್ನು ತಯಾರಿಸುವುದನ್ನು ನಿಲ್ಲಿಸಿ.' }),
+    EN: (v) => ({ title: `Order ${v.orderNumber} cancelled`, body: `${v.reason ? `Reason: ${v.reason}. ` : ''}Stop preparing it.${Number(v.comp) > 0 ? ` Delivez will pay you ${rs(v.comp)} for the food.` : ''}` }),
+    HI: (v) => ({ title: `ऑर्डर ${v.orderNumber} रद्द`, body: `इसे बनाना बंद करें।${Number(v.comp) > 0 ? ` खाने के लिए Delivez आपको ${rs(v.comp)} देगा।` : ''}` }),
+    KN: (v) => ({ title: `ಆರ್ಡರ್ ${v.orderNumber} ರದ್ದಾಗಿದೆ`, body: `ಇದನ್ನು ತಯಾರಿಸುವುದನ್ನು ನಿಲ್ಲಿಸಿ.${Number(v.comp) > 0 ? ` ಊಟಕ್ಕಾಗಿ Delivez ನಿಮಗೆ ${rs(v.comp)} ಪಾವತಿಸುತ್ತದೆ.` : ''}` }),
+  },
+  ORDER_LATE: {
+    EN: (v) => ({ title: `⏰ ${v.orderNumber} is running late`, body: `${v.minutes} min past the time you promised. Mark it ready, or add time so the customer knows.` }),
+    HI: (v) => ({ title: `⏰ ${v.orderNumber} में देर हो रही है`, body: `वादे के समय से ${v.minutes} मिनट ज़्यादा। तैयार मार्क करें, या समय बढ़ाएँ ताकि ग्राहक को पता रहे।` }),
+    KN: (v) => ({ title: `⏰ ${v.orderNumber} ತಡವಾಗುತ್ತಿದೆ`, body: `ನೀವು ಹೇಳಿದ ಸಮಯಕ್ಕಿಂತ ${v.minutes} ನಿಮಿಷ ಹೆಚ್ಚು. ಸಿದ್ಧ ಎಂದು ಗುರುತಿಸಿ, ಅಥವಾ ಸಮಯ ಹೆಚ್ಚಿಸಿ.` }),
+  },
+  DELIVERY_FAILED: {
+    EN: (v) => ({ title: `Delivery failed · ${v.orderNumber}`, body: `${v.reason}. ${v.back ? 'The rider is bringing the items back — check them in when they arrive.' : Number(v.comp) > 0 ? `Delivez will pay you ${rs(v.comp)} for the food.` : ''}` }),
+    HI: (v) => ({ title: `डिलीवरी नहीं हो सकी · ${v.orderNumber}`, body: v.back ? 'राइडर सामान वापस ला रहा है — आने पर जाँच लें।' : Number(v.comp) > 0 ? `खाने के लिए Delivez आपको ${rs(v.comp)} देगा।` : '' }),
+    KN: (v) => ({ title: `ಡೆಲಿವರಿ ಆಗಲಿಲ್ಲ · ${v.orderNumber}`, body: v.back ? 'ರೈಡರ್ ವಸ್ತುಗಳನ್ನು ಹಿಂತಿರುಗಿ ತರುತ್ತಿದ್ದಾರೆ — ಬಂದಾಗ ಪರಿಶೀಲಿಸಿ.' : Number(v.comp) > 0 ? `ಊಟಕ್ಕಾಗಿ Delivez ನಿಮಗೆ ${rs(v.comp)} ಪಾವತಿಸುತ್ತದೆ.` : '' }),
   },
   RIDER_ARRIVED: {
     EN: (v) => ({ title: `Rider is here for ${v.orderNumber}`, body: v.ready ? 'Hand over the order with the rider’s code.' : 'The order is not ready yet — the rider is waiting.' }),
@@ -126,6 +136,31 @@ export const TEMPLATES: Record<string, Partial<Record<Lang, Copy>> & { EN: Copy 
     KN: () => ({ title: 'Delivez ಅಲರ್ಟ್‌ಗಳು ಆನ್ ಆಗಿವೆ', body: 'ಈ ಸಾಧನಕ್ಕೆ ಹೊಸ ಆರ್ಡರ್ ಅಲರ್ಟ್‌ಗಳು ಬರುತ್ತವೆ.' }),
   },
   // ---- Admin console (English)
+  ADMIN_SLA: {
+    EN: (v) => ({
+      title: `${{ PREP_STUCK: 'Order stuck in the kitchen', NO_RIDER: 'No rider for a ready order', DOOR_WAIT: 'Rider waiting at the door' }[String(v.kind)] ?? 'Order SLA'} · ${v.orderNumber}`,
+      body: `${v.store} · ${v.minutes} min. Call the shop / rider, or cancel with a reason code.`,
+    }),
+  },
+  // ---- Account managers (English)
+  AM_SLA: {
+    EN: (v) => ({ title: `🚨 SLA breach · ${v.store}`, body: `${v.orderNumber} ${v.label} (${v.minutes} min). Tap to see the store.` }),
+  },
+  AM_CHURN: {
+    EN: (v) => ({ title: `🔴 Churn risk ${v.risk}/100 · ${v.store}`, body: 'Open the store to see why and what to do.' }),
+  },
+  AM_DROP: {
+    EN: (v) => ({ title: `📉 Orders down ${v.pct}% · ${v.store}`, body: `${v.from} → ${v.to} orders this week. Worth a call.` }),
+  },
+  AM_COMPLAINT: {
+    EN: (v) => ({ title: `Complaint · ${v.store}`, body: `Items were returned at the door on ${v.orderNumber}.` }),
+  },
+  AM_ESCALATED: {
+    EN: (v) => ({ title: `Escalated by account manager · ${v.store}`, body: String(v.title ?? '') }),
+  },
+  OPS_ESCALATED: {
+    EN: (v) => ({ title: `🚨 Escalated · ${v.orderNumber} · ${v.store}`, body: `SLA breached. Escalated by ${v.by}${v.note ? ` — ${v.note}` : ''}.` }),
+  },
   ADMIN_SUPPORT: {
     EN: (v) => ({ title: `New support ticket · ${v.store}`, body: `${v.ticket}: ${v.subject}` }),
   },

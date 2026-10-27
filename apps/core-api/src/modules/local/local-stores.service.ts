@@ -8,8 +8,8 @@ import { imageUrl } from '../catalog/catalog.service';
 import { travelMinutes } from '../orders/order-state.service';
 import { DELIVERY_FEE } from '../orders/orders.service';
 
-/** Customers can pick up from shops a bit further away than shops deliver. */
-export const PICKUP_RADIUS_KM = 10;
+/** Labs are still listed for walk-in slot booking up to this far (a lab visit, not an order pickup). */
+const LAB_WALK_IN_KM = 10;
 /** Soft-launch (LIMITED) shops deliver only close by. */
 const LIMITED_RADIUS_KM = 2;
 const RUNNING = ['LIVE', 'LIMITED'] as const;
@@ -17,9 +17,15 @@ const DEG_BOX = 0.15; // ~16 km pre-filter before the exact distance
 
 const img = (k: string | null | undefined) => (k ? imageUrl(k) : null);
 
+/** "tomorrow 09:00" → { day: 'tomorrow', time: '09:00' } so the app can show it in the customer's language. */
+export function opening(text: string | null): { day: string; time: string } | null {
+  const m = text?.match(/^(\S+) (\d{2}:\d{2})$/);
+  return m ? { day: m[1], time: m[2] } : null;
+}
+
 /**
  * What a customer sees (Local app, L1): shops near an address and a shop's menu. Public — browsing needs no login.
- * Only LIVE / LIMITED shops; delivery within the shop's radius, pickup up to 10 km.
+ * Only LIVE / LIMITED shops that deliver to the address (home delivery only — no self-pickup).
  */
 @Injectable()
 export class LocalStoresService {
@@ -32,7 +38,23 @@ export class LocalStoresService {
         lat: { gte: q.lat - DEG_BOX, lte: q.lat + DEG_BOX },
         lng: { gte: q.lng - DEG_BOX, lte: q.lng + DEG_BOX },
         ...(q.vertical ? { vertical: q.vertical } : {}),
-        ...(q.q ? { OR: [{ name: { contains: q.q, mode: 'insensitive' } }, { cuisines: { has: q.q } }, { products: { some: { name: { contains: q.q, mode: 'insensitive' }, deletedAt: null, isAvailable: true } } }] } : {}),
+        ...(q.q
+          ? {
+              OR: [
+                { name: { contains: q.q, mode: 'insensitive' } },
+                { cuisines: { has: q.q } },
+                {
+                  products: {
+                    some: {
+                      name: { contains: q.q, mode: 'insensitive' },
+                      deletedAt: null,
+                      isAvailable: true,
+                    },
+                  },
+                },
+              ],
+            }
+          : {}),
       },
       include: { timings: true, city: { select: { name: true } } },
       take: 300,
@@ -42,12 +64,10 @@ export class LocalStoresService {
       .map((s) => {
         const km = Math.round(haversineKm(q.lat, q.lng, s.lat!, s.lng!) * 10) / 10;
         const radius = s.status === 'LIMITED' ? Math.min(LIMITED_RADIUS_KM, s.deliveryRadiusKm) : s.deliveryRadiusKm;
-        const delivers = s.supportsDelivery && km <= radius;
-        const pickup = s.supportsPickup && km <= PICKUP_RADIUS_KM;
-        return { s, km, delivers, pickup };
+        return { s, km, delivers: s.supportsDelivery && km <= radius };
       })
-      .filter((x) => x.delivers || x.pickup)
-      .map(({ s, km, delivers, pickup }) => {
+      .filter((x) => x.delivers || (x.s.vertical === 'DIAGNOSTICS' && x.s.supportsPickup && x.km <= LAB_WALK_IN_KM))
+      .map(({ s, km, delivers }) => {
         const open = s.openState !== 'CLOSED';
         const prep = s.defaultPrepMinutes + (s.openState === 'BUSY' ? 10 : 0);
         return {
@@ -66,9 +86,8 @@ export class LocalStoresService {
           busy: s.openState === 'BUSY',
           // Lab tests are booked into slots, so a closed lab can still take bookings.
           bookable: s.vertical === 'DIAGNOSTICS',
-          opensAt: open ? null : nextOpening(s.timings, now),
+          opensAt: open ? null : opening(nextOpening(s.timings, now)),
           delivers,
-          pickup,
           etaMinutes: delivers ? prep + travelMinutes(km) : prep,
           deliveryFee: delivers ? DELIVERY_FEE : 0,
           minOrderAmount: s.minOrderAmount,
@@ -89,11 +108,18 @@ export class LocalStoresService {
       include: {
         timings: true,
         city: { select: { name: true } },
-        categories: { where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
+        categories: {
+          where: { isActive: true },
+          orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        },
         products: {
           where: { deletedAt: null, isAvailable: true },
           orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-          include: { variants: true, addonGroups: { include: { addons: true } }, inventory: true },
+          include: {
+            variants: true,
+            addonGroups: { include: { addons: true } },
+            inventory: true,
+          },
         },
       },
     });
@@ -119,9 +145,36 @@ export class LocalStoresService {
         prescriptionRequired: p.prescriptionRequired,
         saltComposition: p.saltComposition,
         manufacturer: p.manufacturer,
-        lab: s.vertical === 'DIAGNOSTICS' ? { sampleType: p.labSampleType, fastingHours: p.labFastingHours, reportHours: p.labReportHours, homeCollection: p.labHomeCollection, walkIn: p.labWalkIn, parameters: p.labParameters, preparation: p.labPreparation } : null,
-        variants: p.variants.map((v) => ({ id: v.id, name: v.name, priceDiff: v.priceDiff, isDefault: v.isDefault })),
-        addonGroups: p.addonGroups.map((g) => ({ id: g.id, name: g.name, minSelect: g.minSelect, maxSelect: g.maxSelect, addons: g.addons.map((a) => ({ id: a.id, name: a.name, price: a.price, isVeg: a.isVeg })) })),
+        lab:
+          s.vertical === 'DIAGNOSTICS'
+            ? {
+                sampleType: p.labSampleType,
+                fastingHours: p.labFastingHours,
+                reportHours: p.labReportHours,
+                homeCollection: p.labHomeCollection,
+                walkIn: p.labWalkIn,
+                parameters: p.labParameters,
+                preparation: p.labPreparation,
+              }
+            : null,
+        variants: p.variants.map((v) => ({
+          id: v.id,
+          name: v.name,
+          priceDiff: v.priceDiff,
+          isDefault: v.isDefault,
+        })),
+        addonGroups: p.addonGroups.map((g) => ({
+          id: g.id,
+          name: g.name,
+          minSelect: g.minSelect,
+          maxSelect: g.maxSelect,
+          addons: g.addons.map((a) => ({
+            id: a.id,
+            name: a.name,
+            price: a.price,
+            isVeg: a.isVeg,
+          })),
+        })),
         available: !paused && (left == null || left > 0),
         // Shows "Only 3 left" without revealing the stock count above a handful.
         fewLeft: left != null && left > 0 && left <= 5 ? left : null,
@@ -142,9 +195,8 @@ export class LocalStoresService {
         address: [s.addressLine1, s.landmark, s.city?.name].filter(Boolean).join(', '),
         open: s.openState !== 'CLOSED',
         busy: s.openState === 'BUSY',
-        opensAt: s.openState === 'CLOSED' ? nextOpening(s.timings, now) : null,
+        opensAt: s.openState === 'CLOSED' ? opening(nextOpening(s.timings, now)) : null,
         supportsDelivery: s.supportsDelivery,
-        supportsPickup: s.supportsPickup,
         distanceKm: km,
         delivers: km == null ? null : s.supportsDelivery && km <= radius,
         etaMinutes: s.defaultPrepMinutes + (s.openState === 'BUSY' ? 10 : 0) + (km != null ? travelMinutes(km) : 0),
@@ -153,10 +205,7 @@ export class LocalStoresService {
         minOrderAmount: s.minOrderAmount,
         rating: s.ratingCount ? { avg: Math.round(s.avgRating * 10) / 10, count: s.ratingCount } : null,
       },
-      categories: [
-        ...s.categories.filter((c) => used.has(c.id)).map((c) => ({ id: c.id, name: c.name })),
-        ...(used.has(null) ? [{ id: null, name: 'More' }] : []),
-      ],
+      categories: [...s.categories.filter((c) => used.has(c.id)).map((c) => ({ id: c.id, name: c.name })), ...(used.has(null) ? [{ id: null, name: 'More' }] : [])],
       products,
     };
   }

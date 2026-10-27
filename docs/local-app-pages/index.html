@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivez Local Pages</title>
+<meta name="description" content="Design preview of every page in the Delivez Local customer app, for review and sign-off.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
+<style>
+  :root { --red:#d40511; --yellow:#ffcc00; --yellow-soft:#fff7d1; --ink:#000; --ink-2:#4a4a47; --line:#e3e3de; --soft:#f5f5f2; --bg:#fff; --card:#fff; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ink:#f4f4f0; --ink-2:#c9c9c3; --line:#34342f; --soft:#1d1d1b; --bg:#121211; --card:#1a1a18; --yellow-soft:#2e2912; } }
+  :root[data-theme="dark"] { --ink:#f4f4f0; --ink-2:#c9c9c3; --line:#34342f; --soft:#1d1d1b; --bg:#121211; --card:#1a1a18; --yellow-soft:#2e2912; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 'Archivo', system-ui, sans-serif; }
+  h1, h2, h3 { font-stretch:74%; font-weight:900; margin:0; letter-spacing:-.01em; }
+  header { background:var(--yellow); border-bottom:3px solid var(--red); color:#000; }
+  header .in { max-width:1180px; margin:0 auto; padding:0 16px; height:60px; display:flex; align-items:center; gap:10px; }
+  header b { color:var(--red); font-size:28px; font-style:italic; font-weight:900; font-stretch:72%; }
+  .pill { border:1.5px solid #000; background:#fff; border-radius:6px; padding:1px 8px; font-size:12px; font-weight:700; }
+  .wrap { max-width:1180px; margin:0 auto; padding:0 16px; }
+  .hero { background:linear-gradient(135deg, var(--yellow-soft), var(--bg)); border-bottom:1px solid var(--line); padding:44px 0 36px; }
+  .hero h1 { font-size:clamp(36px, 5.5vw, 58px); line-height:.98; }
+  .hero h1 span { color:var(--red); }
+  .hero p { color:var(--ink-2); max-width:760px; margin:12px 0 0; font-size:17px; }
+  .meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:18px; }
+  .chip { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:4px 12px; font-size:13px; font-weight:600; }
+  h2 { font-size:30px; margin:40px 0 16px; }
+  .card { display:grid; grid-template-columns:minmax(0, 1.5fr) minmax(0, 1fr); gap:20px; align-items:center; background:var(--card); border:1px solid var(--line); border-radius:18px; padding:16px; margin-bottom:14px; }
+  .shots { display:flex; gap:12px; align-items:flex-start; min-width:0; }
+  .shots a { display:block; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--soft); }
+  .shots .desk { flex:3; min-width:0; } .shots .phone { flex:1; min-width:0; max-width:150px; }
+  .shots img { display:block; width:100%; height:auto; }
+  .info .num { color:var(--red); font-weight:900; font-size:13px; letter-spacing:.08em; margin:0; }
+  .info h3 { font-size:26px; margin-top:2px; }
+  .info p { color:var(--ink-2); margin:8px 0 0; }
+  .open { display:inline-flex; margin-top:14px; background:var(--red); color:#fff; text-decoration:none; font-weight:800; border-radius:10px; padding:10px 18px; }
+  .review { background:var(--soft); border:1px solid var(--line); border-radius:18px; padding:20px; margin:40px 0 60px; }
+  .review ul { margin:10px 0 0; padding-left:20px; color:var(--ink-2); }
+  .review li { margin:4px 0; }
+  .sign { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px; margin-top:20px; }
+  .sign div { border-bottom:1.5px solid var(--ink); padding-top:28px; font-size:13px; color:var(--ink-2); }
+  footer { background:#000; color:#bdbdb6; font-size:13px; padding:22px 0; }
+  .theme { margin-left:auto; border:0; background:rgba(0,0,0,.07); border-radius:8px; padding:7px 10px; font:inherit; font-weight:700; cursor:pointer; color:#000; }
+  @media (max-width: 760px) { .card { grid-template-columns:minmax(0, 1fr); } .sign { grid-template-columns:minmax(0, 1fr); } }
+  @media print { header, .theme, .open { display:none; } .card { break-inside:avoid; } body { background:#fff; color:#000; } }
+</style>
+</head>
+<body>
+<header><div class="in"><b>DELIVEZ</b><span class="pill">Local</span><button class="theme" id="theme" type="button" aria-label="Switch light or dark">◐</button></div></header>
+<section class="hero"><div class="wrap">
+  <h1>Customer app — <span>pages for approval</span></h1>
+  <p>Every page of the Delivez Local customer app, exported from the working app as it stands today. Click a picture or "Open page" to see the full page; it adapts to window width, so make the browser narrow to see the phone layout.</p>
+  <div class="meta">
+    <span class="chip">12 pages</span>
+    <span class="chip">Desktop + phone</span>
+    <span class="chip">English shown · app also in Hindi, Kannada, Tamil, Telugu, Malayalam, Marathi, Bengali</span>
+    <span class="chip">Exported 27 October 2026</span>
+  </div>
+</div></section>
+<main class="wrap">
+<h2>Public pages (before login)</h2>
+<article class="card">
+  <div class="shots">
+    <a href="landing.html" class="desk"><img src="shots/landing-desktop.jpg" alt="Landing page on desktop"></a>
+    <a href="landing.html" class="phone"><img src="shots/landing-phone.jpg" alt="Landing page on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">01</p>
+    <h3>Landing page</h3>
+    <p>First visit, no location chosen yet. Hero with location box, highlights, categories, why Delivez, order tracking, how it works, medicines &amp; labs, FAQ, shop-owner band, footer.</p>
+    <a class="open" href="landing.html">Open page →</a>
+  </div>
+</article>
+<article class="card">
+  <div class="shots">
+    <a href="login.html" class="desk"><img src="shots/login-desktop.jpg" alt="Log in on desktop"></a>
+    <a href="login.html" class="phone"><img src="shots/login-phone.jpg" alt="Log in on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">02</p>
+    <h3>Log in</h3>
+    <p>Returning customers: mobile number → 6-digit OTP.</p>
+    <a class="open" href="login.html">Open page →</a>
+  </div>
+</article>
+<article class="card">
+  <div class="shots">
+    <a href="signup.html" class="desk"><img src="shots/signup-desktop.jpg" alt="Sign up on desktop"></a>
+    <a href="signup.html" class="phone"><img src="shots/signup-phone.jpg" alt="Sign up on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">03</p>
+    <h3>Sign up</h3>
+    <p>New customers: name, mobile, optional email, terms → OTP → account created.</p>
+    <a class="open" href="signup.html">Open page →</a>
+  </div>
+</article>
+<h2>Shopping</h2>
+<article class="card">
+  <div class="shots">
+    <a href="shops.html" class="desk"><img src="shots/shops-desktop.jpg" alt="Shops near you on desktop"></a>
+    <a href="shops.html" class="phone"><img src="shots/shops-phone.jpg" alt="Shops near you on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">04</p>
+    <h3>Shops near you</h3>
+    <p>After a location is set: search, categories, shops sorted open first, then delivering, then nearest.</p>
+    <a class="open" href="shops.html">Open page →</a>
+  </div>
+</article>
+<article class="card">
+  <div class="shots">
+    <a href="shop-restaurant.html" class="desk"><img src="shots/shop-restaurant-desktop.jpg" alt="Shop page — restaurant on desktop"></a>
+    <a href="shop-restaurant.html" class="phone"><img src="shots/shop-restaurant-phone.jpg" alt="Shop page — restaurant on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">05</p>
+    <h3>Shop page — restaurant</h3>
+    <p>Menu with veg marks, categories, search, veg-only filter, ADD buttons.</p>
+    <a class="open" href="shop-restaurant.html">Open page →</a>
+  </div>
+</article>
+<article class="card">
+  <div class="shots">
+    <a href="shop-grocery.html" class="desk"><img src="shots/shop-grocery-desktop.jpg" alt="Shop page — grocery on desktop"></a>
+    <a href="shop-grocery.html" class="phone"><img src="shots/shop-grocery-phone.jpg" alt="Shop page — grocery on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">06</p>
+    <h3>Shop page — grocery</h3>
+    <p>Items with stock hints, quantity steppers and the cart bar.</p>
+    <a class="open" href="shop-grocery.html">Open page →</a>
+  </div>
+</article>
+<article class="card">
+  <div class="shots">
+    <a href="cart.html" class="desk"><img src="shots/cart-desktop.jpg" alt="Cart &amp; checkout on desktop"></a>
+    <a href="cart.html" class="phone"><img src="shots/cart-phone.jpg" alt="Cart &amp; checkout on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">07</p>
+    <h3>Cart &amp; checkout</h3>
+    <p>Items, note, delivery / pickup, address, bill with ₹30 delivery fee, cash on delivery, Place order.</p>
+    <a class="open" href="cart.html">Open page →</a>
+  </div>
+</article>
+<h2>After ordering & account</h2>
+<article class="card">
+  <div class="shots">
+    <a href="order.html" class="desk"><img src="shots/order-desktop.jpg" alt="Order status on desktop"></a>
+    <a href="order.html" class="phone"><img src="shots/order-phone.jpg" alt="Order status on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">08</p>
+    <h3>Order status</h3>
+    <p>Progress steps, the 4-digit code for the rider, items and bill, call the shop.</p>
+    <a class="open" href="order.html">Open page →</a>
+  </div>
+</article>
+<article class="card">
+  <div class="shots">
+    <a href="orders.html" class="desk"><img src="shots/orders-desktop.jpg" alt="My orders on desktop"></a>
+    <a href="orders.html" class="phone"><img src="shots/orders-phone.jpg" alt="My orders on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">09</p>
+    <h3>My orders</h3>
+    <p>Order history with status chips.</p>
+    <a class="open" href="orders.html">Open page →</a>
+  </div>
+</article>
+<article class="card">
+  <div class="shots">
+    <a href="address.html" class="desk"><img src="shots/address-desktop.jpg" alt="Add address on desktop"></a>
+    <a href="address.html" class="phone"><img src="shots/address-phone.jpg" alt="Add address on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">10</p>
+    <h3>Add address</h3>
+    <p>Map pin (shown as a picture here) and the address form with Home / Work / Other.</p>
+    <a class="open" href="address.html">Open page →</a>
+  </div>
+</article>
+<article class="card">
+  <div class="shots">
+    <a href="account.html" class="desk"><img src="shots/account-desktop.jpg" alt="My account on desktop"></a>
+    <a href="account.html" class="phone"><img src="shots/account-phone.jpg" alt="My account on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">11</p>
+    <h3>My account</h3>
+    <p>Profile, WhatsApp updates, saved addresses, language, log out.</p>
+    <a class="open" href="account.html">Open page →</a>
+  </div>
+</article>
+<article class="card">
+  <div class="shots">
+    <a href="refund-policy.html" class="desk"><img src="shots/refund-policy-desktop.jpg" alt="Refund &amp; cancellation policy on desktop"></a>
+    <a href="refund-policy.html" class="phone"><img src="shots/refund-policy-phone.jpg" alt="Refund &amp; cancellation policy on a phone"></a>
+  </div>
+  <div class="info">
+    <p class="num">12</p>
+    <h3>Refund &amp; cancellation policy</h3>
+    <p>Food pickup &amp; home delivery policy, as supplied. Linked from the footer, the cart and the order screen.</p>
+    <a class="open" href="refund-policy.html">Open page →</a>
+  </div>
+</article>
+  <section class="review">
+    <h3 style="font-size:24px">Notes for the reviewer</h3>
+    <ul>
+      <li>These are static snapshots: links between pages work, but buttons, search, the FAQ and menus don't run. The live app does all of that.</li>
+      <li>Shops, items, prices and the order are sample data from our test setup (Demo Grocery, Meghana Foods). The order code and times change on every order.</li>
+      <li>The map on "Add address" is a picture of the live Google map.</li>
+      <li>Payment today is cash / UPI on delivery or at the shop; online payment, prescription upload and lab slot booking are planned next.</li>
+    </ul>
+    <div class="sign"><div>Reviewed by</div><div>Date</div><div>Approved / changes needed</div></div>
+  </section>
+</main>
+<footer><div class="wrap">Delivez Local · design preview for internal review</div></footer>
+<script>
+  (function () {
+    var root = document.documentElement;
+    try { var s = localStorage.getItem('dz-review-theme'); if (s) root.setAttribute('data-theme', s); } catch (e) {}
+    document.getElementById('theme').addEventListener('click', function () {
+      var dark = root.getAttribute('data-theme') ? root.getAttribute('data-theme') === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+      root.setAttribute('data-theme', dark ? 'light' : 'dark');
+      try { localStorage.setItem('dz-review-theme', dark ? 'light' : 'dark'); } catch (e) {}
+    });
+  })();
+</script>
+</body>
+</html>

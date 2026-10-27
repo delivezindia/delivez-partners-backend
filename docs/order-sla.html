@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Delivez Order SLA</title>
+<meta name="description" content="Order SLA: time limits for every stage, and what happens to the customer, the shop and the goods when an order is cancelled or a delivery fails." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet" />
+<style>
+  :root { --red:#d40511; --red-soft:#fdecee; --yellow:#ffcc00; --yellow-soft:#fff7d1; --green:#14803a; --green-soft:#e8f6ec; --blue:#1a56db; --blue-soft:#eaf1ff; --ink:#000; --ink-2:#4a4a47; --ink-3:#7c7c77; --line:#e3e3de; --soft:#f5f5f2; --bg:#fff; --card:#fff; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ink:#f4f4f0; --ink-2:#c9c9c3; --ink-3:#9a9a94; --line:#34342f; --soft:#1d1d1b; --bg:#121211; --card:#1a1a18; --red-soft:#3a1416; --yellow-soft:#2e2912; --green-soft:#13291b; --blue-soft:#15203a; } }
+  :root[data-theme="dark"] { --ink:#f4f4f0; --ink-2:#c9c9c3; --ink-3:#9a9a94; --line:#34342f; --soft:#1d1d1b; --bg:#121211; --card:#1a1a18; --red-soft:#3a1416; --yellow-soft:#2e2912; --green-soft:#13291b; --blue-soft:#15203a; }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; scroll-padding-top:72px; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 'Archivo', system-ui, sans-serif; }
+  h1, h2, h3 { font-stretch:74%; font-weight:900; letter-spacing:-.01em; margin:0; }
+  h1 { font-size:clamp(36px, 5.5vw, 58px); line-height:.98; }
+  h2 { font-size:clamp(26px, 3.6vw, 36px); line-height:1; }
+  h3 { font-size:20px; }
+  p { margin:0; }
+  code { font:12.5px ui-monospace, Consolas, monospace; background:var(--soft); padding:1px 6px; border-radius:6px; }
+  header.top { position:sticky; top:0; z-index:10; background:var(--yellow); border-bottom:3px solid var(--red); color:#000; }
+  header.top .in { max-width:1120px; margin:0 auto; padding:0 16px; height:58px; display:flex; align-items:center; gap:12px; }
+  header.top b { color:var(--red); font-size:26px; font-style:italic; font-weight:900; font-stretch:72%; }
+  .pill { border:1.5px solid #000; background:#fff; border-radius:6px; padding:1px 8px; font-size:12px; font-weight:700; }
+  nav.toc { margin-left:auto; display:flex; gap:2px; overflow-x:auto; }
+  nav.toc a { white-space:nowrap; text-decoration:none; color:#000; font-weight:600; font-size:14px; padding:8px 9px; border-radius:8px; }
+  nav.toc a:hover { color:var(--red); }
+  .theme { border:0; background:rgba(0,0,0,.07); border-radius:8px; padding:7px 10px; font:inherit; font-weight:700; cursor:pointer; color:#000; }
+  .wrap { max-width:1120px; margin:0 auto; padding:0 16px; }
+  .hero { background:linear-gradient(135deg, var(--yellow-soft), var(--bg)); border-bottom:1px solid var(--line); padding:44px 0 36px; }
+  .hero h1 span { color:var(--red); }
+  .hero p { color:var(--ink-2); font-size:17px; max-width:780px; margin-top:12px; }
+  .badge { display:inline-flex; border:1px solid #e6b800; background:var(--yellow-soft); border-radius:999px; padding:4px 10px; font-size:12px; font-weight:700; margin-bottom:14px; }
+  section.block { padding:46px 0; border-bottom:1px solid var(--line); }
+  section.alt { background:var(--soft); }
+  .eyebrow { color:var(--red); font-size:13px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; margin-bottom:8px; }
+  .intro { color:var(--ink-2); margin-top:10px; max-width:780px; }
+  .tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius:14px; background:var(--card); margin-top:20px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; min-width:720px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-3); background:var(--soft); }
+  tr:last-child td { border-bottom:0; }
+  .tag { display:inline-block; font-size:11px; font-weight:800; border-radius:999px; padding:2px 8px; white-space:nowrap; }
+  .f-c { background:var(--yellow-soft); color:#8a6100; } .f-s { background:var(--red-soft); color:var(--red); } .f-p { background:var(--blue-soft); color:var(--blue); } .f-r { background:#f3e8ff; color:#7e22ce; } .f-n { background:var(--soft); color:var(--ink-2); border:1px solid var(--line); }
+  .grid { display:grid; gap:14px; margin-top:20px; }
+  .g3 { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+  .g2 { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; min-width:0; }
+  .card p, .card li { color:var(--ink-2); font-size:14px; }
+  .card ul { margin:8px 0 0; padding-left:18px; }
+  .rule { border-left:4px solid var(--red); }
+  .note { margin-top:16px; background:var(--yellow-soft); border:1px solid #e6b800; border-radius:12px; padding:12px 14px; font-size:14px; }
+  .sign { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px; margin-top:24px; }
+  .sign div { border-bottom:1.5px solid var(--ink); padding-top:28px; font-size:13px; color:var(--ink-2); }
+  footer { background:#000; color:#bdbdb6; padding:24px 0; font-size:13px; }
+  @media (max-width: 860px) { .g3, .g2, .sign { grid-template-columns:minmax(0, 1fr); } nav.toc { display:none; } }
+  @media print { header.top { position:static; } .theme { display:none; } section.block { break-inside:avoid; } }
+</style>
+</head>
+<body>
+<header class="top"><div class="in">
+  <b>DELIVEZ</b><span class="pill">Order SLA</span>
+  <nav class="toc" aria-label="Sections"><a href="#timers">Time limits</a><a href="#matrix">If cancelled</a><a href="#reasons">Reason codes</a><a href="#examples">Examples</a><a href="#screens">Who sees what</a><a href="#open">Open points</a></nav>
+  <button class="theme" id="theme" type="button" aria-label="Switch light or dark">◐</button>
+</div></header>
+
+<div class="hero"><div class="wrap">
+  <span class="badge">Draft for approval · 27 October 2026 · built and tested in the app</span>
+  <h1>Order SLA — <span>what happens when an order doesn’t go to plan.</span></h1>
+  <p>Every order has a time limit at each stage. When an order is cancelled or a delivery fails, the system records <b>why</b> (a reason code) and <b>when</b> (the stage). From those two it decides whose fault it was, what the customer gets back, what Delivez pays the shop, and what happens to the goods. Nothing is decided by hand except the reason ops pick.</p>
+</div></div>
+
+<section class="block" id="timers"><div class="wrap">
+  <p class="eyebrow">1 · Time limits</p>
+  <h2>Each stage has a clock</h2>
+  <p class="intro">Breaches are checked every 5 seconds. Alerts fire once per order.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Stage</th><th>Limit</th><th>If missed</th><th>Who is told</th></tr></thead>
+    <tbody>
+      <tr><td>Shop accepts a new order</td><td>3 minutes (reminder at 60 s)</td><td>Auto-rejected · <span class="tag f-s">Shop’s fault</span> · customer refunded in full</td><td>Shop: “Missed order” (+ SMS to owner) · customer sees “The shop didn’t respond in time”</td></tr>
+      <tr><td>Pharmacist reviews a prescription</td><td>15 minutes</td><td>Auto-cancelled · <span class="tag f-s">Shop’s fault</span> · full refund</td><td>Shop, customer</td></tr>
+      <tr><td>Kitchen / packing (promised prep time, incl. any “add time”)</td><td>+10 min late</td><td>Alert only</td><td>Shop: “⏰ DEL-… is running late — mark it ready, or add time”</td></tr>
+      <tr><td></td><td>+30 min late</td><td>Alert only — ops decide (call the shop / cancel with a code)</td><td>City ops: “Order stuck in the kitchen”</td></tr>
+      <tr><td>Rider assigned to a ready order</td><td>10 minutes after ready</td><td>Alert only — ops reassign or cancel (“No rider”)</td><td>City ops: “No rider for a ready order”</td></tr>
+      <tr><td>Rider waiting at the customer’s door</td><td>10 minutes</td><td>Alert only — ops decide: delivered, or delivery failed with a reason</td><td>City ops: “Rider waiting at the door”</td></tr>
+      <tr><td>Grocery doorstep check</td><td>5 minutes after delivery</td><td>Window closes; returns no longer possible</td><td>— (existing)</td></tr>
+    </tbody>
+  </table></div>
+</div></section>
+
+<section class="block alt" id="matrix"><div class="wrap">
+  <p class="eyebrow">2 · If an order ends early</p>
+  <h2>Who gets what</h2>
+  <p class="intro">Stages: <b>Before accept</b> (new / prescription check) · <b>Preparing</b> (accepted, cooking or packing) · <b>Ready</b> · <b>Picked up</b> (with the rider). Customer app orders are always paid online (no cash on delivery, no platform fee, no packaging fee), so the customer column is the refund. Cash amounts below apply only to a shop’s own counter / phone orders.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Whose fault</th><th>When</th><th>Customer</th><th>Shop</th><th>Goods</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag f-c">Customer</span></td><td>Before accept</td><td>Free — full refund / not charged</td><td>Nothing</td><td>Reserved stock freed</td></tr>
+      <tr><td><span class="tag f-c">Customer</span></td><td>Preparing / ready (asked support)</td><td><b>Food:</b> not refunded (COD: recorded as unpaid) · <b>Other shops:</b> refunded in full</td><td><b>Food:</b> Delivez pays items + packaging · others: nothing</td><td>Food stays at the shop · stock freed</td></tr>
+      <tr><td><span class="tag f-c">Customer</span></td><td>Picked up (not reachable, refused, wrong address)</td><td><b>Food:</b> not refunded · <b>Other shops:</b> refunded except the ₹30 delivery fee</td><td><b>Food:</b> Delivez pays items + packaging · others: goods come back</td><td>Food written off · groceries / medicines ride back, shop checks them in (“back on shelf” or “damaged”)</td></tr>
+      <tr><td><span class="tag f-s">Shop</span></td><td>Any (rejects, misses, can’t finish)</td><td>Refunded in full / not charged · “Sorry — it wasn’t your fault”</td><td>No compensation · counts on store record</td><td>Stock freed</td></tr>
+      <tr><td><span class="tag f-p">Delivez</span></td><td>Any (no rider, platform issue)</td><td>Refunded in full / not charged</td><td>Food: Delivez pays items + packaging if cooking had started</td><td>Stock freed (before pickup)</td></tr>
+      <tr><td><span class="tag f-r">Rider</span></td><td>Picked up (accident, damaged on the way)</td><td>Refunded in full / not charged</td><td>Food: Delivez pays items + packaging</td><td>Food written off · goods ride back</td></tr>
+      <tr><td><span class="tag f-n">No one</span></td><td>Any (weather, strike, emergency, duplicate)</td><td>Refunded in full / not charged</td><td>Food: Delivez pays if cooking had started</td><td>As above</td></tr>
+    </tbody>
+  </table></div>
+  <div class="grid g3">
+    <div class="card rule"><h3>The three principles</h3><ul><li>The customer pays only for their own choices after the shop started work.</li><li>The shop is never out of pocket for cooked food it couldn’t sell, unless it caused the cancel.</li><li>Goods that can go back on a shelf always go back.</li></ul></div>
+    <div class="card"><h3>Who can cancel</h3><ul><li><b>Customer:</b> in the app, only before the shop accepts (free).</li><li><b>Shop:</b> rejects before accepting, with a reason.</li><li><b>Ops:</b> any time before pickup, must pick a reason code.</li><li><b>After pickup:</b> no cancel — it’s “Delivery failed” with a reason.</li></ul></div>
+    <div class="card"><h3>Records kept</h3><ul><li>Reason code, fault and stage on every ended order.</li><li>Store compensation and customer unpaid amounts.</li><li>Shop-fault ends count on the store record; customer-fault failures after work started are recorded against the customer.</li></ul></div>
+  </div>
+</div></section>
+
+<section class="block" id="reasons"><div class="wrap">
+  <p class="eyebrow">3 · Reason codes</p>
+  <h2>Every ended order carries one</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Who sets it</th><th>Reason</th><th>Fault</th></tr></thead>
+    <tbody>
+      <tr><td>Customer (app)</td><td>Cancelled by the customer</td><td><span class="tag f-c">Customer</span></td></tr>
+      <tr><td>Shop (reject)</td><td>Items unavailable · Too busy · Closing · Kitchen / equipment issue · Other</td><td><span class="tag f-s">Shop</span></td></tr>
+      <tr><td>Pharmacist</td><td>Prescription not accepted</td><td><span class="tag f-n">No one</span></td></tr>
+      <tr><td>System</td><td>Not accepted in 3 min · Prescription not reviewed in 15 min</td><td><span class="tag f-s">Shop</span></td></tr>
+      <tr><td>Ops (cancel)</td><td>Store cannot complete it</td><td><span class="tag f-s">Shop</span></td></tr>
+      <tr><td>Ops (cancel)</td><td>No rider available · Delivez technical / ops issue</td><td><span class="tag f-p">Delivez</span></td></tr>
+      <tr><td>Ops (cancel)</td><td>Customer asked to cancel</td><td><span class="tag f-c">Customer</span></td></tr>
+      <tr><td>Ops (cancel)</td><td>Duplicate order · Weather, strike or emergency</td><td><span class="tag f-n">No one</span></td></tr>
+      <tr><td>Rider / ops (delivery failed)</td><td>Customer not reachable · Refused · Wrong / incomplete address</td><td><span class="tag f-c">Customer</span></td></tr>
+      <tr><td>Rider / ops (delivery failed)</td><td>Rider could not finish · Damaged on the way</td><td><span class="tag f-r">Rider</span></td></tr>
+      <tr><td>Rider / ops (delivery failed)</td><td>Weather, strike or emergency</td><td><span class="tag f-n">No one</span></td></tr>
+    </tbody>
+  </table></div>
+</div></section>
+
+<section class="block alt" id="examples"><div class="wrap">
+  <p class="eyebrow">4 · Worked examples</p>
+  <h2>₹400 food + ₹30 delivery = ₹430, paid online</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>What happened</th><th>Customer</th><th>Shop</th></tr></thead>
+    <tbody>
+      <tr><td>Customer cancels before the shop accepts</td><td>₹430 back</td><td>—</td></tr>
+      <tr><td>Shop too busy, rejects</td><td>₹430 back</td><td>Counts on its record</td></tr>
+      <tr><td>No rider while the food is cooking</td><td>₹430 back</td><td>Delivez pays ₹400</td></tr>
+      <tr><td>Customer not at the door (food)</td><td>No refund</td><td>Delivez pays ₹400</td></tr>
+      <tr><td>Rider accident after pickup</td><td>₹430 back</td><td>Delivez pays ₹400</td></tr>
+      <tr><td>Grocery ₹400 + ₹30, wrong address</td><td>₹400 back (delivery fee kept)</td><td>Items return to the shelf</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">These rules live in one file (<code>apps/core-api/src/modules/orders/sla.ts</code>) with 13 unit tests, plus 26 end-to-end checks and 10 browser checks covering every row above.</p>
+</div></section>
+
+<section class="block" id="screens"><div class="wrap">
+  <p class="eyebrow">5 · Who sees what</p>
+  <h2>On each screen</h2>
+  <div class="grid g3">
+    <div class="card"><h3>Customer app</h3><ul><li>The reason in plain words, in their language (21 reasons × 8 languages).</li><li>“Sorry — it wasn’t your fault” when it wasn’t.</li><li>Money line: refund amount and 5–10 working days, delivery fee kept, not charged, or unpaid amount.</li><li>Link to the refund &amp; cancellation policy.</li></ul></div>
+    <div class="card"><h3>Partners app (shop)</h3><ul><li>“Why this order ended” card with the reason.</li><li>“Delivez will pay you ₹… for the food you made.”</li><li>“This counts on your store record” for shop-fault ends.</li><li>Goods coming back: check in as back on shelf / damaged.</li><li>Alerts: cancelled (with compensation), running late, delivery failed.</li></ul></div>
+    <div class="card"><h3>Admin console (ops)</h3><ul><li>Cancel = pick a reason; each option shows its outcome before you confirm.</li><li>Delivery failed = pick a reason.</li><li>Order panel: fault, refunded, store compensation, unpaid.</li><li>Alerts: stuck in kitchen, no rider, rider waiting at the door.</li></ul></div>
+  </div>
+</div></section>
+
+<section class="block alt" id="open"><div class="wrap">
+  <p class="eyebrow">6 · Open points for approval</p>
+  <h2>Decisions needed</h2>
+  <div class="grid g2">
+    <div class="card"><h3>Not built yet (needs a decision or another module)</h3><ul><li><b>Paying the shop:</b> compensation is recorded per order; actual payout comes with the payouts module.</li><li><b>Refunds:</b> recorded as “refund initiated”; real money moves when Razorpay is connected (L5).</li><li><b>Online payment:</b> app orders are paid by UPI, card or net banking. Until Razorpay is connected the payment is simulated in dev/test and app ordering is switched off in production.</li><li><b>Customer push alerts</b> for cancellations come with L3; today the order screen shows it.</li></ul></div>
+    <div class="card"><h3>Refund policy now matches this SLA</h3><ul><li>The customer policy page (<code>/refund-policy</code>) was rewritten from these rules: free cancel only before the shop accepts, no cancellation fees, no waiting charges, no wallet credits, no self-pickup.</li><li>Commitments to confirm before launch: 24 h to report a problem with food or medicines, 48 h support reply, and the support email (placeholder: support@delivez.com).</li></ul></div>
+  </div>
+  <div class="sign"><div>Reviewed by</div><div>Date</div><div>Approved / changes needed</div></div>
+</div></section>
+
+<footer><div class="wrap">Delivez · Order SLA · source of truth: <code style="background:#222;color:#ddd">apps/core-api/src/modules/orders/sla.ts</code></div></footer>
+<script>
+  (function () {
+    var root = document.documentElement;
+    try { var s = localStorage.getItem('dz-sla-theme'); if (s) root.setAttribute('data-theme', s); } catch (e) {}
+    document.getElementById('theme').addEventListener('click', function () {
+      var dark = root.getAttribute('data-theme') ? root.getAttribute('data-theme') === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+      root.setAttribute('data-theme', dark ? 'light' : 'dark');
+      try { localStorage.setItem('dz-sla-theme', dark ? 'light' : 'dark'); } catch (e) {}
+    });
+  })();
+</script>
+</body>
+</html>

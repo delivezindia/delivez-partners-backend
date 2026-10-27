@@ -116,6 +116,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         if (byPartner) return; // the store typed it in itself
         return this.toStore(e, storeId!, ORDER_ROLES, { app: 'PARTNERS', code: 'ORDER_PLACED', vars: { orderNumber: d.orderNumber, items: d.itemCount, total: d.grandTotal }, url: orders(), tag: `order-${d.orderId}`, urgent: true });
       case 'order.return_created':
+        if (d.undelivered) return; // a failed delivery: the order.delivery_failed alert already says the goods are coming back
         return this.toStore(e, storeId!, ORDER_ROLES, { app: 'PARTNERS', code: 'RETURN_COMING', vars: { orderNumber: d.orderNumber, items: (d.items as { qty: number }[] | undefined)?.reduce((n, i) => n + i.qty, 0) ?? 0, amount: d.amount }, url: orders(d.orderNumber), tag: `return-${d.orderId}`, urgent: true });
       case 'order.rx_submitted':
         return this.toStore(e, storeId!, REMIND_TO, { app: 'PARTNERS', code: 'RX_REVIEW', vars: { orderNumber: d.orderNumber, items: d.itemCount, total: d.grandTotal, minutes: d.reviewMinutes }, url: `/stores/${storeId}/prescriptions`, tag: `order-${d.orderId}`, urgent: true });
@@ -127,7 +128,14 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         return this.toStore(e, storeId!, LEADS, { app: 'PARTNERS', code: 'ORDER_MISSED', vars: { orderNumber: d.orderNumber }, url: orders(d.orderNumber), tag: `order-${d.orderId}`, offApp: OWNER_SMS });
       case 'order.cancelled':
         if (byPartner) return;
-        return this.toStore(e, storeId!, ORDER_ROLES, { app: 'PARTNERS', code: 'ORDER_CANCELLED', vars: { orderNumber: d.orderNumber, reason: d.reason }, url: orders(d.orderNumber), tag: `order-${d.orderId}`, urgent: true });
+        return this.toStore(e, storeId!, ORDER_ROLES, { app: 'PARTNERS', code: 'ORDER_CANCELLED', vars: { orderNumber: d.orderNumber, reason: d.reason, comp: d.storeCompensation }, url: orders(d.orderNumber), tag: `order-${d.orderId}`, urgent: true });
+      case 'order.delivery_failed':
+        return this.toStore(e, storeId!, LEADS, { app: 'PARTNERS', code: 'DELIVERY_FAILED', vars: { orderNumber: d.orderNumber, reason: d.reason, comp: d.storeCompensation, back: d.goods === 'RETURN_TO_STORE' ? 1 : 0 }, url: orders(d.orderNumber), tag: `order-${d.orderId}`, urgent: true });
+      case 'order.sla_breach': {
+        // Running late is the shop's to fix; stuck orders, missing riders and door waits go to city ops.
+        if (d.kind === 'PREP_LATE') return this.toStore(e, storeId!, ['OWNER', 'MANAGER', 'KITCHEN_LEAD'], { app: 'PARTNERS', code: 'ORDER_LATE', vars: { orderNumber: d.orderNumber, minutes: d.minutes }, url: orders(d.orderNumber), tag: `late-${d.orderId}`, urgent: true });
+        return this.deliver(e, await this.admins(ROLES.OPERATE_STORES, d.cityId ?? null), { app: 'ADMIN', code: 'ADMIN_SLA', vars: { kind: d.kind, orderNumber: d.orderNumber, minutes: d.minutes, store: await this.storeName(storeId!) }, url: `/orders?q=${d.orderNumber}`, tag: `sla-${d.kind}-${d.orderId}`, storeId });
+      }
       case 'delivery.task_updated': {
         if (d.status !== 'ARRIVED_AT_PICKUP') return;
         const o = await this.prisma.order.findUnique({ where: { id: d.orderId }, select: { orderNumber: true, status: true } });

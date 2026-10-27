@@ -12,11 +12,14 @@ import { OrderReportsService } from './order-reports.service';
 import { SimulatorService } from './simulator.service';
 import { SubstitutionsService } from './substitutions.service';
 import { ReturnsService } from './returns.service';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { OpsAlertsController } from './ops-alerts.controller';
+import { OpsAlertsService } from './ops-alerts.service';
 
 @Module({
-  imports: [PartnersModule, FilesModule],
-  controllers: [PartnerOrdersController, DevOrdersController, AdminOrdersController, OrderReportsController],
-  providers: [OrderStateService, OrdersService, DispatchService, SimulatorService, SubstitutionsService, ReturnsService, OrderJobsScheduler, OrderReportsService, AdminGuard],
-  exports: [OrderStateService, OrdersService, OrderReportsService],
+  imports: [PartnersModule, FilesModule, NotificationsModule],
+  controllers: [PartnerOrdersController, DevOrdersController, AdminOrdersController, OrderReportsController, OpsAlertsController],
+  providers: [OrderStateService, OrdersService, DispatchService, SimulatorService, SubstitutionsService, ReturnsService, OpsAlertsService, OrderJobsScheduler, OrderReportsService, AdminGuard],
+  exports: [OrderStateService, OrdersService, OrderReportsService, SimulatorService],
 })
 export class OrdersModule {}

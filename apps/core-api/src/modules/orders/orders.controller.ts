@@ -1,3 +1,4 @@
+import { FAIL_CODES, OPS_CANCEL_CODES } from './sla';
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiError } from '../../common/api-exception.filter';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -127,7 +128,7 @@ export class PartnerOrdersController {
   async reject(@Param('storeId', ParseUUIDPipe) storeId: string, @Param('orderId', ParseUUIDPipe) orderId: string, @Body(new ZodValidationPipe(rejectSchema)) b: z.infer<typeof rejectSchema>, @CurrentUser() u: AuthUser, @CurrentStore() s: StoreAccess, @Req() r: ApiRequest) {
     await this.orders.mustOwn(storeId, orderId);
     const reason = b.note ? `${REJECT_TEXT[b.reason]}: ${b.note}` : REJECT_TEXT[b.reason];
-    await this.state.transition(orderId, 'REJECT', partnerActor(u, s, r), { reason, meta: { code: b.reason } });
+    await this.state.transition(orderId, 'REJECT', partnerActor(u, s, r), { reason, code: b.reason === 'STORE_CLOSING' ? 'STORE_CLOSING' : `STORE_${b.reason}`, meta: { code: b.reason } });
     return this.orders.detailById(orderId);
   }
 
@@ -249,8 +250,11 @@ const adminListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   before: z.string().datetime().optional(),
 });
-const adminCancelSchema = z.object({ reason: z.string().trim().min(5).max(300) });
-const taskStepSchema = z.object({ status: z.enum(TASK_STEPS), reason: z.string().trim().max(200).optional() });
+// Ops pick why (decides refund / compensation / whose fault, see sla.ts); the note is optional detail.
+const adminCancelSchema = z.object({ code: z.enum(OPS_CANCEL_CODES), note: z.string().trim().max(300).optional() });
+const taskStepSchema = z
+  .object({ status: z.enum(TASK_STEPS), reason: z.string().trim().max(200).optional(), code: z.enum(FAIL_CODES).optional() })
+  .refine((v) => v.status !== 'FAILED' || !!v.code, { message: 'Choose why the delivery failed', path: ['code'] });
 const adminActor = (a: AdminContext, r: ApiRequest): OrderActor => ({ kind: 'ADMIN', userId: a.userId, role: a.role, correlationId: r.correlationId });
 const ORDER_OPS = [...ROLES.OPERATE_STORES, 'SUPPORT' as const];
 
@@ -298,7 +302,7 @@ export class AdminOrdersController {
   @HttpCode(200)
   @AdminRoles(...ORDER_OPS)
   cancel(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(adminCancelSchema)) b: z.infer<typeof adminCancelSchema>, @CurrentAdmin() a: AdminContext, @Req() r: ApiRequest) {
-    return this.dispatch.cancel(id, b.reason, adminActor(a, r), a.cityIds);
+    return this.dispatch.cancel(id, b.code, b.note, adminActor(a, r), a.cityIds);
   }
 
   @Post('tasks/:id/assign')
@@ -312,6 +316,6 @@ export class AdminOrdersController {
   @HttpCode(200)
   @AdminRoles(...ROLES.OPERATE_STORES)
   step(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(taskStepSchema)) b: z.infer<typeof taskStepSchema>, @CurrentAdmin() a: AdminContext, @Req() r: ApiRequest) {
-    return this.dispatch.step(id, b.status, b.reason, adminActor(a, r), a.cityIds);
+    return this.dispatch.step(id, b.status, b.reason, adminActor(a, r), a.cityIds, b.code);
   }
 }

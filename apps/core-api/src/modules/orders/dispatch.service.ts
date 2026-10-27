@@ -1,3 +1,4 @@
+import { CANCEL_TEXT, type CancelCode } from './sla';
 import { HttpStatus, Injectable } from '@nestjs/common';
 import type { DeliveryTaskStatus, Prisma } from '@delivez/db';
 import { ApiError } from '../../common/api-exception.filter';
@@ -93,9 +94,9 @@ export class DispatchService {
     };
   }
 
-  async cancel(orderId: string, reason: string, actor: OrderActor, cityIds: string[] = []) {
+  async cancel(orderId: string, code: CancelCode, note: string | undefined, actor: OrderActor, cityIds: string[] = []) {
     await this.assertInScope(orderId, cityIds);
-    await this.state.transition(orderId, 'CANCEL', actor, { reason });
+    await this.state.transition(orderId, 'CANCEL', actor, { reason: note ? `${CANCEL_TEXT[code]} — ${note}` : CANCEL_TEXT[code], code });
     return this.adminDetail(orderId);
   }
 
@@ -113,7 +114,7 @@ export class DispatchService {
   }
 
   /** Moves the task like the rider app would, and keeps the order in step. */
-  async step(taskId: string, step: TaskStep, reason: string | undefined, actor: OrderActor, cityIds: string[] = []) {
+  async step(taskId: string, step: TaskStep, reason: string | undefined, actor: OrderActor, cityIds: string[] = [], code?: CancelCode) {
     const task = await this.prisma.deliveryTask.findUnique({ where: { id: taskId }, include: { order: { select: { id: true, status: true } } } });
     if (!task?.order) throw new ApiError(HttpStatus.NOT_FOUND, 'TASK_NOT_FOUND', 'Delivery task not found');
     await this.assertInScope(task.order.id, cityIds);
@@ -145,7 +146,7 @@ export class DispatchService {
         await this.state.transition(orderId, 'DELIVER', actor);
         break;
       case 'FAILED':
-        await this.state.transition(orderId, 'FAIL_DELIVERY', actor, { reason: reason || 'Delivery failed' });
+        await this.state.transition(orderId, 'FAIL_DELIVERY', actor, { reason: reason || (code ? CANCEL_TEXT[code] : 'Delivery failed'), code });
         break;
     }
     return this.adminDetail(orderId);

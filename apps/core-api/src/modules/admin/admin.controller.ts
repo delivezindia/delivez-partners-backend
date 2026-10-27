@@ -59,6 +59,7 @@ export class AdminController {
   }
 
   @Get('me')
+  @AdminRoles(...ROLES.READ, 'ACCOUNT_MANAGER')
   me(@CurrentAdmin() admin: AdminContext) {
     return this.admin.me(admin);
   }

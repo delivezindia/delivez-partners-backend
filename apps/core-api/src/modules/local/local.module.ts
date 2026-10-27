@@ -6,14 +6,19 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { Apps, CurrentUser, Public } from '../identity/auth.decorators';
 import { LocalAccountService } from './local-account.service';
 import { LocalStoresService } from './local-stores.service';
-import { LocalOrdersService } from './local-orders.service';
+import { LocalOrdersService, ONLINE_METHODS } from './local-orders.service';
 import { OrdersModule } from '../orders/orders.module';
 import { RequireIdempotency } from '../../common/idempotency.interceptor';
 
 const VERTICALS = ['EAT', 'GROCERY', 'PHARMACY', 'DIAGNOSTICS', 'LOCAL_STORES'] as const;
 const lat = z.coerce.number().min(6).max(38);
 const lng = z.coerce.number().min(68).max(98);
-const nearbyQuery = z.object({ lat, lng, vertical: z.enum(VERTICALS).optional(), q: z.string().trim().min(2).max(60).optional() });
+const nearbyQuery = z.object({
+  lat,
+  lng,
+  vertical: z.enum(VERTICALS).optional(),
+  q: z.string().trim().min(2).max(60).optional(),
+});
 const menuQuery = z.object({ lat: lat.optional(), lng: lng.optional() });
 const meSchema = z.object({
   fullName: z.string().trim().min(2).max(80).optional(),
@@ -24,7 +29,11 @@ const meSchema = z.object({
 const addressSchema = z.object({
   label: z.enum(['HOME', 'WORK', 'OTHER']).default('HOME'),
   contactName: z.string().trim().max(80).optional(),
-  contactPhone: z.string().trim().regex(/^\+?\d{10,13}$/, 'Enter a valid phone number').optional(),
+  contactPhone: z
+    .string()
+    .trim()
+    .regex(/^\+?\d{10,13}$/, 'Enter a valid phone number')
+    .optional(),
   line1: z.string().trim().min(3, 'Enter the house / flat and street').max(160),
   line2: z.string().trim().max(160).optional(),
   landmark: z.string().trim().max(120).optional(),
@@ -45,16 +54,19 @@ const itemSchema = z.object({
 });
 const quoteSchema = z.object({
   storeId: z.string().uuid(),
-  fulfilmentType: z.enum(['DELIVERY', 'PICKUP']),
+  // Home delivery only — customers can't collect from the shop.
+  fulfilmentType: z.literal('DELIVERY').default('DELIVERY'),
   addressId: z.string().uuid().optional(),
   items: z.array(itemSchema).min(1, 'Your cart is empty').max(50),
 });
 const checkoutSchema = quoteSchema.extend({
-  // Online payment arrives with Razorpay (L5).
-  paymentMode: z.literal('COD'),
+  // Online only — no cash on delivery for app orders.
+  paymentMode: z.enum(ONLINE_METHODS),
   note: z.string().trim().max(300).optional(),
 });
-const cancelSchema = z.object({ reason: z.string().trim().max(200).optional() });
+const cancelSchema = z.object({
+  reason: z.string().trim().max(200).optional(),
+});
 
 /** Browsing — no login needed. */
 @ApiTags('local')
@@ -98,12 +110,21 @@ export class LocalAccountController {
   }
 
   @Post('addresses')
-  add(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(addressSchema)) b: z.infer<typeof addressSchema>) {
+  add(
+    @CurrentUser() u: AuthUser,
+    @Body(new ZodValidationPipe(addressSchema))
+    b: z.infer<typeof addressSchema>,
+  ) {
     return this.account.addAddress(u.userId, b);
   }
 
   @Put('addresses/:id')
-  update2(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(addressSchema)) b: z.infer<typeof addressSchema>) {
+  update2(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(addressSchema))
+    b: z.infer<typeof addressSchema>,
+  ) {
     return this.account.updateAddress(u.userId, id, b);
   }
 
@@ -128,7 +149,11 @@ export class LocalOrdersController {
 
   @Post('orders')
   @RequireIdempotency()
-  place(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(checkoutSchema)) b: z.infer<typeof checkoutSchema>) {
+  place(
+    @CurrentUser() u: AuthUser,
+    @Body(new ZodValidationPipe(checkoutSchema))
+    b: z.infer<typeof checkoutSchema>,
+  ) {
     return this.orders.place(u.userId, b);
   }
 

@@ -135,7 +135,7 @@ export class AdminService {
     ]);
 
     return {
-      store: { id: store.id, name: store.name, status: store.status, vertical: store.vertical, storeType: store.storeType, rejectedReason: store.rejectedReason, liveAt: store.liveAt, createdAt: store.createdAt },
+      store: { id: store.id, name: store.name, status: store.status, vertical: store.vertical, storeType: store.storeType, rejectedReason: store.rejectedReason, liveAt: store.liveAt, createdAt: store.createdAt, accountManagerId: store.accountManagerId },
       onboarding: view,
       members: store.partnerAccount.members.map((m) => ({ memberId: m.id, role: m.role, isActive: m.isActive, invited: !m.isActive && !m.acceptedAt, ...m.user })),
       documents: store.documents.map((d) => ({

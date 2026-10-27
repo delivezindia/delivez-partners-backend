@@ -22,6 +22,7 @@ import { PartnersModule } from './modules/partners/partners.module';
 import { FilesModule } from './modules/files/files.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { AccountManagersModule } from './modules/account-managers/am.module';
 import { StoresModule } from './modules/stores/stores.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -44,6 +45,7 @@ import { SystemModule } from './modules/system/system.module';
     PartnersModule,
     OnboardingModule,
     AdminModule,
+    AccountManagersModule,
     OrdersModule,
     LabBookingsModule,
     PharmacyModule,

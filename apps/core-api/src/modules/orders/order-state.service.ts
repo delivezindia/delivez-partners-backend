@@ -5,6 +5,7 @@ import { EventBus } from '../../events/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { checkTransition, type ActorKind, type OrderAction } from './order-state';
 import { RETURN_WINDOW_MINUTES, returnsAllowed } from './returns-rules';
+import { CANCEL_TEXT, cancellationOutcome, stageOf, type CancelCode } from './sla';
 
 export interface OrderActor {
   kind: ActorKind;
@@ -20,6 +21,8 @@ export interface TransitionOptions {
   prepMinutes?: number;
   /** READY_SOON: the upper bound of the window ("ready in 5–10 min" → 10). */
   windowMinutes?: number;
+  /** REJECT / RX_REJECT / CANCEL / FAIL_DELIVERY: why it ended (order SLA). Decides refund, compensation and goods. */
+  code?: CancelCode;
   /** HANDOVER: how the rider was verified. */
   verifiedBy?: 'OTP' | 'QR' | 'MANUAL';
   /** Extra writes that must commit with the transition (e.g. the prescription review), run after the rule check. */
@@ -91,12 +94,13 @@ export class OrderStateService {
           break;
         }
         case 'RX_REJECT':
-        case 'REJECT':
+        case 'REJECT': {
+          const code = opts.code ?? (action === 'RX_REJECT' ? 'RX_REJECTED' : actor.kind === 'SYSTEM' ? 'ACCEPT_TIMEOUT' : 'STORE_OTHER');
           Object.assign(data, { rejectReason: opts.reason, cancelledAt: now, cancelledBy: actor.kind === 'SYSTEM' ? 'SYSTEM' : 'STORE' });
-          await this.release(tx, order, actor);
-          Object.assign(data, await this.refundStub(tx, order, opts.reason!, actor.kind === 'SYSTEM' ? 'SYSTEM' : 'STORE'));
+          Object.assign(data, await this.settle(tx, order, code, opts.reason!, actor, actor.kind === 'SYSTEM' ? 'SYSTEM' : 'STORE', eventData));
           if (order.deliveryTask) await this.setTask(tx, order.deliveryTask, 'CANCELLED', {}, actor.kind);
           break;
+        }
         case 'ACCEPT': {
           const busy = order.store.openState === 'BUSY';
           const prep = opts.prepMinutes ?? order.store.defaultPrepMinutes + (busy ? 10 : 0);
@@ -149,16 +153,19 @@ export class OrderStateService {
           if (order.deliveryTask) await this.setTask(tx, order.deliveryTask, 'DELIVERED', { deliveredAt: now, codCollected: order.paymentMode === 'COD' }, actor.kind);
           break;
         case 'FAIL_DELIVERY':
+          Object.assign(data, { cancelledAt: now, cancelledBy: actor.kind, cancelReason: opts.reason });
+          Object.assign(data, await this.settle(tx, order, opts.code ?? 'FAIL_CUSTOMER_UNAVAILABLE', opts.reason!, actor, actor.kind === 'ADMIN' ? 'ADMIN' : 'SYSTEM', eventData));
           if (order.deliveryTask) await this.setTask(tx, order.deliveryTask, 'FAILED', { failedReason: opts.reason }, actor.kind);
           break;
-        case 'CANCEL':
+        case 'CANCEL': {
+          const code = opts.code ?? (actor.kind === 'CUSTOMER' ? 'CUSTOMER_CANCELLED' : 'OPS_PLATFORM_ISSUE');
           Object.assign(data, { cancelledAt: now, cancelledBy: actor.kind, cancelReason: opts.reason });
-          await this.release(tx, order, actor);
-          Object.assign(data, await this.refundStub(tx, order, opts.reason!, actor.kind === 'ADMIN' ? 'ADMIN' : 'SYSTEM'));
+          Object.assign(data, await this.settle(tx, order, code, opts.reason!, actor, actor.kind === 'ADMIN' ? 'ADMIN' : actor.kind === 'CUSTOMER' ? 'CUSTOMER' : 'SYSTEM', eventData));
           if (order.deliveryTask && !['DELIVERED', 'CANCELLED', 'FAILED'].includes(order.deliveryTask.status)) {
             await this.setTask(tx, order.deliveryTask, 'CANCELLED', {}, actor.kind);
           }
           break;
+        }
       }
 
       if (opts.inTx) await opts.inTx(tx, order);
@@ -227,16 +234,52 @@ export class OrderStateService {
   // Refunds — stub until the payments module lands (plan §10: refund hook)
   // ------------------------------------------------------------------
 
-  private async refundStub(tx: Prisma.TransactionClient, order: OrderForTransition, reason: string, initiatedBy: string): Promise<Prisma.OrderUpdateInput> {
-    if (!['CAPTURED', 'AUTHORIZED'].includes(order.paymentStatus)) return {};
+  private async refundStub(tx: Prisma.TransactionClient, order: OrderForTransition, reason: string, initiatedBy: string, due: number): Promise<Prisma.OrderUpdateInput> {
+    if (!['CAPTURED', 'AUTHORIZED'].includes(order.paymentStatus) || due <= 0) return {};
     const payment = await tx.payment.findFirst({ where: { orderId: order.id, status: { in: ['CAPTURED', 'AUTHORIZED'] } } });
     const refunded = await tx.refund.aggregate({ where: { orderId: order.id }, _sum: { amount: true } });
-    const amount = order.grandTotal - (refunded._sum.amount ?? 0);
+    const amount = Math.min(due, order.grandTotal - (refunded._sum.amount ?? 0));
     if (amount > 0) {
       await tx.refund.create({ data: { orderId: order.id, paymentId: payment?.id, amount, reason, initiatedBy } });
       await this.events.publish(tx, { type: 'payment.refund_initiated', data: { storeId: order.storeId, orderId: order.id, amount, reason }, actor: { type: 'SYSTEM' } });
     }
     return { paymentStatus: 'REFUND_PENDING' };
+  }
+
+  /**
+   * Order SLA: settles an order that ended early (sla.ts) — the goods (freed / sent back / written off), the refund,
+   * what the shop is owed for cooked food, what a COD customer left unpaid, and whose record it goes on.
+   */
+  private async settle(tx: Prisma.TransactionClient, order: OrderForTransition, code: CancelCode, reason: string, actor: OrderActor, initiatedBy: string, eventData: Record<string, unknown>): Promise<Prisma.OrderUpdateInput> {
+    const stage = stageOf(order.status);
+    const out = cancellationOutcome({ code, stage, vertical: order.vertical, paymentMode: order.paymentMode, totals: { items: order.itemsSubtotal, delivery: order.deliveryFee, packaging: order.packagingFee, grandTotal: order.grandTotal } });
+    if (out.goods === 'RELEASE') await this.release(tx, order, actor);
+    if (out.goods === 'RETURN_TO_STORE') {
+      // Sealed goods ride back to the shop; the shop confirms them with "Received" (restock) like a doorstep return.
+      const items = order.items.filter((i) => !i.isOutOfStock && i.qty - i.returnedQty > 0);
+      for (const i of items) {
+        const qty = i.qty - i.returnedQty;
+        await tx.orderReturn.create({
+          data: { orderId: order.id, orderItemId: i.id, productId: i.productId, productName: i.productName, qty, amount: i.unitPrice * qty, reason: 'UNDELIVERED', note: CANCEL_TEXT[code], status: 'WITH_RIDER', refundMethod: order.paymentMode === 'COD' ? 'NONE' : 'ONLINE', createdByType: actor.kind === 'ADMIN' ? 'ADMIN' : 'RIDER', createdByUserId: actor.userId },
+        });
+      }
+      if (items.length) {
+        await this.events.publish(tx, {
+          type: 'order.return_created',
+          data: { storeId: order.storeId, orderId: order.id, orderNumber: order.orderNumber, items: items.map((i) => ({ name: i.productName, qty: i.qty - i.returnedQty })), amount: 0, undelivered: true },
+          actor: { type: actor.kind, userId: actor.userId },
+        });
+      }
+    }
+    Object.assign(eventData, { code, fault: out.fault, stage, refund: out.refund, storeCompensation: out.storeCompensation, customerDue: out.customerDue, goods: out.goods });
+    return {
+      cancelCode: code,
+      cancelFault: out.fault,
+      cancelStage: stage,
+      storeCompensation: out.storeCompensation,
+      customerDue: out.customerDue,
+      ...(await this.refundStub(tx, order, reason, initiatedBy, out.refund)),
+    };
   }
 
   // ------------------------------------------------------------------

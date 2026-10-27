@@ -8,7 +8,7 @@ import { indianPhone } from '../identity/phone';
 import { AdminGuard, AdminRoles, CurrentAdmin, ROLES, type AdminContext } from './admin.guard';
 import { AdminPlatformService } from './admin-platform.service';
 
-const ADMIN_ROLES = ['FOUNDER', 'HEAD_OF_OPS', 'REGIONAL_HEAD', 'CITY_OPS', 'COMPLIANCE', 'FINANCE', 'LEGAL', 'SUPPORT', 'SALES_AGENT', 'AUDITOR'] as const;
+const ADMIN_ROLES = ['FOUNDER', 'HEAD_OF_OPS', 'REGIONAL_HEAD', 'CITY_OPS', 'COMPLIANCE', 'FINANCE', 'LEGAL', 'SUPPORT', 'SALES_AGENT', 'AUDITOR', 'ACCOUNT_MANAGER'] as const;
 const LEGAL_TYPES = ['PARTNER_TNC', 'SLA_TERMS', 'STATE_RIDER', 'PENALTY_FRAMEWORK', 'CUSTOMER_TNC', 'PRIVACY_POLICY', 'RX_DECLARATION', 'WHATSAPP_OPT_IN'] as const;
 
 const addAdminSchema = z.object({
