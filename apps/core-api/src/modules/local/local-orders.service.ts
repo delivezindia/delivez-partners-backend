@@ -6,6 +6,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OrderStateService } from '../orders/order-state.service';
 import { DELIVERY_FEE, OrdersService, type ItemInput } from '../orders/orders.service';
 import { LocalAccountService } from './local-account.service';
+import { PaymentsService } from '../payments/payments.service';
+import { StorageService } from '../files/storage.service';
+import { pharmacistsOnDuty } from '../pharmacy/duty';
+import { SubstitutionsService } from '../orders/substitutions.service';
+import { ReturnsService } from '../orders/returns.service';
+import { returnsAllowed, windowState, type ReturnRequest } from '../orders/returns-rules';
+
+/** Quick tags a customer can add to a rating. */
+export const REVIEW_TAGS = ['ON_TIME', 'LATE', 'GOOD_PACKING', 'POOR_PACKING', 'FRESH', 'WRONG_ITEM', 'FRIENDLY', 'COLD_FOOD'] as const;
 
 /** App orders are paid online; Delivez charges no platform fee and no packaging fee. */
 export const ONLINE_METHODS = ['UPI', 'CARD', 'NETBANKING'] as const;
@@ -17,6 +26,8 @@ export interface CheckoutInput {
   items: ItemInput[];
   paymentMode: (typeof ONLINE_METHODS)[number];
   note?: string;
+  /** Uploaded prescription (keys from rxUpload) for medicines that need one. */
+  prescriptionFileKeys?: string[];
 }
 
 /** A basket line the customer has to fix before ordering. */
@@ -47,6 +58,10 @@ const ORDER_INCLUDE = {
     },
   },
   refunds: { select: { amount: true } },
+  prescription: { select: { status: true, rejectionReason: true } },
+  substitutions: { orderBy: { createdAt: 'asc' } },
+  returns: { orderBy: { createdAt: 'asc' } },
+  review: { select: { rating: true, comment: true, tags: true, reply: true, createdAt: true } },
 } satisfies Prisma.OrderInclude;
 type Row = Prisma.OrderGetPayload<{ include: typeof ORDER_INCLUDE }>;
 
@@ -63,7 +78,55 @@ export class LocalOrdersService {
     private readonly orders: OrdersService,
     private readonly state: OrderStateService,
     private readonly account: LocalAccountService,
+    private readonly payments: PaymentsService,
+    private readonly storage: StorageService,
+    private readonly substitutions: SubstitutionsService,
+    private readonly returns: ReturnsService,
   ) {}
+
+  /** Where to upload the prescription for a pharmacy order (private; only that pharmacy and ops can open it). */
+  async rxUpload(userId: string, storeId: string, contentType: string, size: number) {
+    await this.account.customer(userId);
+    const store = await this.prisma.store.findFirst({ where: { id: storeId, vertical: 'PHARMACY', status: { in: ['LIVE', 'LIMITED'] } }, select: { id: true } });
+    if (!store) throw new ApiError(HttpStatus.NOT_FOUND, 'STORE_NOT_FOUND', 'This pharmacy isn’t taking orders on Delivez');
+    return this.storage.presignUpload(`stores/${store.id}/rx`, contentType, size);
+  }
+
+  /** The customer's answer to a replacement the shop offered. */
+  async respondSubstitution(userId: string, orderId: string, subId: string, accept: boolean) {
+    const o = await this.detail(userId, orderId);
+    await this.substitutions.respond(o.id, subId, accept, { kind: 'CUSTOMER', userId });
+    return this.detail(userId, o.id);
+  }
+
+  /** Doorstep check: items handed back to the rider (or missing) are refunded at once. */
+  async returnItems(userId: string, orderId: string, items: ReturnRequest[], note?: string) {
+    const o = await this.detail(userId, orderId);
+    await this.returns.create(o.id, items, note, { kind: 'CUSTOMER', userId });
+    return this.detail(userId, o.id);
+  }
+
+  /** "All good" — the rider can leave. */
+  async keepAll(userId: string, orderId: string) {
+    const o = await this.detail(userId, orderId);
+    await this.returns.close(o.id, { kind: 'CUSTOMER', userId });
+    return this.detail(userId, o.id);
+  }
+
+  /** One rating per delivered order; the shop's average updates straight away. */
+  async review(userId: string, orderId: string, input: { rating: number; comment?: string; tags?: string[] }) {
+    const customer = await this.account.customer(userId);
+    const o = await this.prisma.order.findFirst({ where: { id: orderId, customerId: customer.id }, select: { id: true, storeId: true, status: true, orderNumber: true, review: { select: { id: true } } } });
+    if (!o) throw new ApiError(HttpStatus.NOT_FOUND, 'ORDER_NOT_FOUND', 'Order not found');
+    if (!['DELIVERED', 'COMPLETED'].includes(o.status)) throw new ApiError(HttpStatus.CONFLICT, 'NOT_DELIVERED', 'You can rate an order once it’s delivered');
+    if (o.review) throw new ApiError(HttpStatus.CONFLICT, 'ALREADY_RATED', 'You’ve already rated this order');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.review.create({ data: { orderId: o.id, customerId: customer.id, storeId: o.storeId, rating: input.rating, comment: input.comment || null, tags: input.tags ?? [] } });
+      // Running average, locked so two ratings at once don't overwrite each other.
+      await tx.$executeRaw`UPDATE stores SET "avgRating" = ("avgRating" * "ratingCount" + ${input.rating}) / ("ratingCount" + 1), "ratingCount" = "ratingCount" + 1 WHERE id = ${o.storeId}`;
+    });
+    return this.detail(userId, o.id);
+  }
 
   /** Bill preview for the cart screen: real prices, fees, and anything that stops the order. */
   async quote(userId: string, input: Omit<CheckoutInput, 'paymentMode' | 'note'>) {
@@ -146,6 +209,9 @@ export class LocalOrdersService {
     }
     const delivery = DELIVERY_FEE;
     const packaging = 0;
+    // Prescription medicines: need the doctor's prescription uploaded, and a pharmacist on duty to check it.
+    const rxNames = store.vertical === 'PHARMACY' ? priced.filter((l) => l.isRx).map((l) => l.name) : [];
+    const noPharmacist = rxNames.length > 0 && !(await pharmacistsOnDuty(this.prisma, store.id)).length;
     const blockers = [
       ...(store.openState === 'CLOSED' ? ['STORE_CLOSED'] : []),
       ...(!store.supportsDelivery ? ['DELIVERY_NOT_OFFERED'] : []),
@@ -153,7 +219,8 @@ export class LocalOrdersService {
       ...(outOfRange ? ['OUT_OF_RANGE'] : []),
       ...(items < store.minOrderAmount ? ['BELOW_MINIMUM'] : []),
       ...(store.vertical === 'DIAGNOSTICS' ? ['LAB_BOOKING'] : []),
-      ...(priced.some((l) => l.isRx) ? ['RX_REQUIRED'] : []),
+      ...(noPharmacist ? ['NO_PHARMACIST'] : []),
+      ...(rxNames.length && !input.prescriptionFileKeys?.length ? ['RX_REQUIRED'] : []),
       ...(problems.length ? ['ITEMS'] : []),
     ];
     return {
@@ -169,6 +236,7 @@ export class LocalOrdersService {
       },
       lines: priced,
       problems,
+      rxItems: rxNames,
       distanceKm,
       totals: {
         items,
@@ -183,8 +251,9 @@ export class LocalOrdersService {
   }
 
   async place(userId: string, input: CheckoutInput) {
-    // Until the payment gateway is connected, online payment is simulated — never in production.
-    if (process.env.NODE_ENV === 'production') throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'PAYMENTS_NOT_LIVE', 'Online payment opens soon — ordering in the app isn’t available yet');
+    // With Razorpay keys the order waits for the payment; without them dev simulates it and production refuses.
+    const gateway = this.payments.enabled;
+    if (!gateway && process.env.NODE_ENV === 'production') throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'PAYMENTS_NOT_LIVE', 'Online payment opens soon — ordering in the app isn’t available yet');
     const q = await this.quote(userId, input);
     const first = q.blockers.find((b) => b !== 'ITEMS');
     if (first === 'STORE_CLOSED') throw new ApiError(HttpStatus.CONFLICT, 'STORE_CLOSED', 'The shop has just closed — try again when it opens');
@@ -193,8 +262,9 @@ export class LocalOrdersService {
     if (first === 'ADDRESS_REQUIRED') throw new ApiError(HttpStatus.BAD_REQUEST, 'ADDRESS_REQUIRED', 'Choose a delivery address');
     if (first === 'DELIVERY_NOT_OFFERED') throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'DELIVERY_NOT_OFFERED', 'This shop doesn’t deliver yet');
     if (first === 'OUT_OF_RANGE') throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'OUT_OF_RANGE', 'This shop doesn’t deliver to that address — try another address');
-    if (first === 'LAB_BOOKING') throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'LAB_BOOKINGS_LATER', 'Lab tests are booked into a time slot — that’s coming to the app soon');
-    if (first === 'RX_REQUIRED') throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'RX_REQUIRED', 'Prescription medicines need a prescription upload — that’s coming to the app soon');
+    if (first === 'LAB_BOOKING') throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'LAB_BOOKING', 'Lab tests are booked into a time slot — use Book a slot');
+    if (first === 'NO_PHARMACIST') throw new ApiError(HttpStatus.CONFLICT, 'NO_PHARMACIST_ON_DUTY', 'Prescription medicines can only be ordered while the pharmacist is on duty');
+    if (first === 'RX_REQUIRED') throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'RX_REQUIRED', 'Upload the doctor’s prescription for these medicines');
     if (first) throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, first, 'This order can’t be placed');
     if (q.problems.length) throw new ApiError(HttpStatus.CONFLICT, 'CART_CHANGED', 'Some items in your cart have changed', { problems: q.problems });
 
@@ -222,10 +292,19 @@ export class LocalOrdersService {
           contactPhone: a.contactPhone ? (a.contactPhone.startsWith('+') ? a.contactPhone : `+91${a.contactPhone.slice(-10)}`) : undefined,
         },
         note: input.note,
+        prescriptionFileKeys: q.rxItems.length ? input.prescriptionFileKeys : undefined,
+        awaitPayment: gateway,
       },
       { kind: 'CUSTOMER', userId },
     );
-    return this.detail(userId, order.id);
+    if (!gateway) return this.detail(userId, order.id);
+    try {
+      return { ...(await this.detail(userId, order.id)), checkout: await this.payments.checkout(order.id) };
+    } catch (e) {
+      // Couldn't reach Razorpay: give the stock back so the customer can simply try again.
+      await this.orders.releaseDraft(order.id, 'Payment could not be started', { kind: 'SYSTEM' });
+      throw e;
+    }
   }
 
   async list(userId: string, cursor?: string) {
@@ -262,9 +341,26 @@ export class LocalOrdersService {
     };
   }
 
-  /** Customers can cancel until the shop accepts. */
+  /** Pay (again) for an order still waiting for payment. */
+  async payment(userId: string, orderId: string) {
+    const o = await this.detail(userId, orderId);
+    if (o.status !== 'DRAFT') throw new ApiError(HttpStatus.CONFLICT, 'ALREADY_PAID', 'This order is already paid or closed');
+    return this.payments.checkout(o.id);
+  }
+
+  async verifyPayment(userId: string, orderId: string, b: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) {
+    const o = await this.detail(userId, orderId);
+    if (o.status === 'DRAFT') await this.payments.verify(o.id, b);
+    return this.detail(userId, o.id);
+  }
+
+  /** Customers can cancel until the shop accepts (or before paying). */
   async cancel(userId: string, orderId: string, reason?: string) {
     const o = await this.detail(userId, orderId);
+    if (o.status === 'DRAFT') {
+      await this.payments.abandon(o.id, userId);
+      return this.detail(userId, o.id);
+    }
     if (!['PLACED', 'AWAITING_RX_REVIEW'].includes(o.status)) throw new ApiError(HttpStatus.CONFLICT, 'TOO_LATE_TO_CANCEL', 'The shop has already started on your order — contact support to cancel');
     await this.state.transition(o.id, 'CANCEL', { kind: 'CUSTOMER', userId }, { reason: reason || 'Cancelled by customer' });
     return this.detail(userId, o.id);
@@ -316,11 +412,12 @@ export class LocalOrdersService {
       },
       payment: { mode: o.paymentMode, status: o.paymentStatus },
       // The rider asks for this at the door.
-      codes: active && o.fulfilmentType === 'DELIVERY' ? { delivery: o.deliveryOtp } : null,
-      etaAt: o.currentEtaAt ?? o.promisedDeliveryAt,
+      codes: active && o.status !== 'DRAFT' && o.fulfilmentType === 'DELIVERY' ? { delivery: o.deliveryOtp } : null,
+      etaAt: o.status === 'DRAFT' ? null : (o.currentEtaAt ?? o.promisedDeliveryAt),
       placedAt: o.placedAt ?? o.createdAt,
       deliveredAt: o.deliveredAt ?? o.completedAt,
-      canCancel: ['PLACED', 'AWAITING_RX_REVIEW'].includes(o.status),
+      canCancel: ['DRAFT', 'PLACED', 'AWAITING_RX_REVIEW'].includes(o.status),
+      awaitingPayment: o.status === 'DRAFT',
       cancelReason: o.status === 'REJECTED' ? o.rejectReason : o.cancelReason,
       // Order SLA outcome for the customer: the reason code (translated in the app), whose fault, and the money.
       cancellation: o.cancelCode
@@ -332,6 +429,17 @@ export class LocalOrdersService {
           }
         : null,
       note: o.customerNote,
+      rx: o.prescription ? { status: o.prescription.status, rejectionReason: o.prescription.rejectionReason } : null,
+      // Replacements the shop offered: open ones need an answer before respondBy.
+      substitutions: o.substitutions.map((s) => {
+        const item = o.items.find((i) => i.id === s.orderItemId);
+        return { id: s.id, status: s.status, forItem: item?.productName ?? '', forQty: item?.qty ?? 0, forTotal: item?.lineTotal ?? 0, name: s.productName, variant: s.variantName, qty: s.qty, lineTotal: s.lineTotal, note: s.note, respondBy: s.respondBy };
+      }),
+      // Doorstep check (grocery / local shops): a few minutes after delivery to hand items back.
+      returnWindow: returnsAllowed(o.vertical, o.fulfilmentType) && o.returnWindowEndsAt ? { state: windowState(o), endsAt: o.returnWindowEndsAt, outcome: o.returnWindowOutcome } : null,
+      returns: o.returns.map((r) => ({ id: r.id, name: r.productName, qty: r.qty, amount: r.amount, reason: r.reason, status: r.status })),
+      review: o.review,
+      canRate: ['DELIVERED', 'COMPLETED'].includes(o.status) && !o.review,
       rider: task?.rider
         ? {
             name: task.rider.user.fullName?.split(/\s+/)[0] ?? null,

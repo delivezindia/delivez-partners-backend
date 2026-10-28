@@ -8,5 +8,6 @@ import { SupportService } from './support.service';
   imports: [PartnersModule],
   controllers: [PartnerSupportController, AdminSupportController],
   providers: [SupportService, AdminGuard],
+  exports: [SupportService],
 })
 export class SupportModule {}

@@ -60,6 +60,16 @@ export const TEMPLATES: Record<string, Partial<Record<Lang, Copy>> & { EN: Copy 
     HI: (v) => ({ title: `आइटम वापस आ रहे हैं · ${v.orderNumber}`, body: `ग्राहक ने ${v.items} आइटम लौटाए (${rs(v.amount)} वापस)। राइडर के आने पर जाँचें।` }),
     KN: (v) => ({ title: `ಐಟಂಗಳು ಹಿಂತಿರುಗುತ್ತಿವೆ · ${v.orderNumber}`, body: `ಗ್ರಾಹಕರು ${v.items} ಐಟಂ ಹಿಂತಿರುಗಿಸಿದ್ದಾರೆ (${rs(v.amount)} ಮರುಪಾವತಿ). ರೈಡರ್ ಬಂದಾಗ ಪರಿಶೀಲಿಸಿ.` }),
   },
+  SUB_ACCEPTED: {
+    EN: (v) => ({ title: `Replacement accepted · ${v.orderNumber}`, body: `${v.detail}. Pack the replacement.` }),
+    HI: (v) => ({ title: `बदला हुआ आइटम स्वीकार · ${v.orderNumber}`, body: `${v.detail}. बदला हुआ आइटम पैक करें।` }),
+    KN: (v) => ({ title: `ಬದಲಿ ಸ್ವೀಕರಿಸಲಾಗಿದೆ · ${v.orderNumber}`, body: `${v.detail}. ಬದಲಿ ವಸ್ತುವನ್ನು ಪ್ಯಾಕ್ ಮಾಡಿ.` }),
+  },
+  SUB_DECLINED: {
+    EN: (v) => ({ title: `Replacement declined · ${v.orderNumber}`, body: `${v.expired ? 'No answer from the customer — the item was removed.' : 'The customer said no — the item was removed.'} Pack the rest.` }),
+    HI: (v) => ({ title: `बदला हुआ आइटम अस्वीकार · ${v.orderNumber}`, body: 'आइटम हटा दिया गया। बाकी पैक करें।' }),
+    KN: (v) => ({ title: `ಬದಲಿ ತಿರಸ್ಕರಿಸಲಾಗಿದೆ · ${v.orderNumber}`, body: 'ವಸ್ತುವನ್ನು ತೆಗೆಯಲಾಗಿದೆ. ಉಳಿದವನ್ನು ಪ್ಯಾಕ್ ಮಾಡಿ.' }),
+  },
   // ---- Partners: pharmacy (no medicine names — health data)
   RX_REVIEW: {
     EN: (v) => ({ title: `Prescription to check · ${v.orderNumber}`, body: `${v.items} item(s) · ${rs(v.total)} · review within ${v.minutes} minutes` }),
@@ -98,6 +108,87 @@ export const TEMPLATES: Record<string, Partial<Record<Lang, Copy>> & { EN: Copy 
     EN: (v) => ({ title: `Booking ${v.bookingNumber} cancelled`, body: 'The slot is free again.' }),
     HI: (v) => ({ title: `बुकिंग ${v.bookingNumber} रद्द`, body: 'स्लॉट फिर से खाली है।' }),
     KN: (v) => ({ title: `ಬುಕಿಂಗ್ ${v.bookingNumber} ರದ್ದಾಗಿದೆ`, body: 'ಸ್ಲಾಟ್ ಮತ್ತೆ ಲಭ್ಯವಿದೆ.' }),
+  },
+  LAB_RESCHEDULED: {
+    EN: (v) => ({ title: `Booking ${v.bookingNumber} moved`, body: `New slot: ${v.when}.` }),
+    HI: (v) => ({ title: `बुकिंग ${v.bookingNumber} का समय बदला`, body: `नया स्लॉट: ${v.when}` }),
+    KN: (v) => ({ title: `ಬುಕಿಂಗ್ ${v.bookingNumber} ಸಮಯ ಬದಲಾಗಿದೆ`, body: `ಹೊಸ ಸ್ಲಾಟ್: ${v.when}` }),
+  },
+  // ---- Customers (customer app): order progress
+  CUST_ACCEPTED: {
+    EN: (v) => ({ title: `${v.store} accepted your order`, body: `${v.orderNumber} is being prepared${v.minutes ? ` · ready in about ${v.minutes} min` : ''}.` }),
+    HI: (v) => ({ title: `${v.store} ने आपका ऑर्डर स्वीकार किया`, body: `${v.orderNumber} तैयार हो रहा है${v.minutes ? ` · लगभग ${v.minutes} मिनट` : ''}।` }),
+    KN: (v) => ({ title: `${v.store} ನಿಮ್ಮ ಆರ್ಡರ್ ಸ್ವೀಕರಿಸಿದೆ`, body: `${v.orderNumber} ತಯಾರಾಗುತ್ತಿದೆ${v.minutes ? ` · ಸುಮಾರು ${v.minutes} ನಿಮಿಷ` : ''}.` }),
+  },
+  CUST_REJECTED: {
+    EN: (v) => ({ title: `${v.store} couldn’t take ${v.orderNumber}`, body: `${Number(v.refund) > 0 ? `${rs(v.refund)} is being refunded to you.` : 'You have not been charged.'}` }),
+    HI: (v) => ({ title: `${v.store} ${v.orderNumber} नहीं ले सका`, body: Number(v.refund) > 0 ? `${rs(v.refund)} आपको वापस किया जा रहा है।` : 'आपसे कोई पैसा नहीं लिया गया।' }),
+    KN: (v) => ({ title: `${v.store} ${v.orderNumber} ಸ್ವೀಕರಿಸಲಾಗಲಿಲ್ಲ`, body: Number(v.refund) > 0 ? `${rs(v.refund)} ಮರುಪಾವತಿ ಆಗುತ್ತಿದೆ.` : 'ನಿಮ್ಮಿಂದ ಹಣ ಪಡೆದಿಲ್ಲ.' }),
+  },
+  CUST_ON_WAY: {
+    EN: (v) => ({ title: `${v.orderNumber} is on the way`, body: `The rider has picked it up from ${v.store}.` }),
+    HI: (v) => ({ title: `${v.orderNumber} रास्ते में है`, body: `राइडर ने ${v.store} से ऑर्डर ले लिया है।` }),
+    KN: (v) => ({ title: `${v.orderNumber} ದಾರಿಯಲ್ಲಿದೆ`, body: `ರೈಡರ್ ${v.store} ನಿಂದ ಆರ್ಡರ್ ಪಡೆದಿದ್ದಾರೆ.` }),
+  },
+  CUST_ARRIVED: {
+    EN: (v) => ({ title: 'Your rider is here', body: `${v.orderNumber} is at your door. Share your delivery code with the rider.` }),
+    HI: (v) => ({ title: 'राइडर आ गया है', body: `${v.orderNumber} आपके दरवाज़े पर है। राइडर को डिलीवरी कोड बताएँ।` }),
+    KN: (v) => ({ title: 'ರೈಡರ್ ಬಂದಿದ್ದಾರೆ', body: `${v.orderNumber} ನಿಮ್ಮ ಬಾಗಿಲಲ್ಲಿದೆ. ಡೆಲಿವರಿ ಕೋಡ್ ತಿಳಿಸಿ.` }),
+  },
+  CUST_DELIVERED: {
+    EN: (v) => ({ title: `${v.orderNumber} delivered`, body: 'Enjoy! Something wrong? Report it from the order.' }),
+    HI: (v) => ({ title: `${v.orderNumber} डिलीवर हुआ`, body: 'कोई समस्या? ऑर्डर से बताएँ।' }),
+    KN: (v) => ({ title: `${v.orderNumber} ತಲುಪಿದೆ`, body: 'ಸಮಸ್ಯೆಯಿದೆಯೇ? ಆರ್ಡರ್‌ನಿಂದ ತಿಳಿಸಿ.' }),
+  },
+  CUST_CANCELLED: {
+    EN: (v) => ({ title: `${v.orderNumber} was cancelled`, body: `${v.reason ? `${v.reason}. ` : ''}${Number(v.refund) > 0 ? `${rs(v.refund)} is being refunded to you.` : ''}`.trim() }),
+    HI: (v) => ({ title: `${v.orderNumber} रद्द हुआ`, body: Number(v.refund) > 0 ? `${rs(v.refund)} आपको वापस किया जा रहा है।` : '' }),
+    KN: (v) => ({ title: `${v.orderNumber} ರದ್ದಾಗಿದೆ`, body: Number(v.refund) > 0 ? `${rs(v.refund)} ಮರುಪಾವತಿ ಆಗುತ್ತಿದೆ.` : '' }),
+  },
+  CUST_FAILED: {
+    EN: (v) => ({ title: `We couldn’t deliver ${v.orderNumber}`, body: `${v.reason ? `${v.reason}. ` : ''}${Number(v.refund) > 0 ? `${rs(v.refund)} is being refunded to you.` : 'Open the order for details.'}` }),
+    HI: (v) => ({ title: `${v.orderNumber} डिलीवर नहीं हो सका`, body: Number(v.refund) > 0 ? `${rs(v.refund)} आपको वापस किया जा रहा है।` : 'विवरण के लिए ऑर्डर खोलें।' }),
+    KN: (v) => ({ title: `${v.orderNumber} ತಲುಪಿಸಲಾಗಲಿಲ್ಲ`, body: Number(v.refund) > 0 ? `${rs(v.refund)} ಮರುಪಾವತಿ ಆಗುತ್ತಿದೆ.` : 'ವಿವರಗಳಿಗೆ ಆರ್ಡರ್ ತೆರೆಯಿರಿ.' }),
+  },
+  CUST_DELAYED: {
+    EN: (v) => ({ title: `${v.orderNumber} is running late`, body: `${v.store} needs about ${v.minutes} more min. Sorry for the wait.` }),
+    HI: (v) => ({ title: `${v.orderNumber} में देर हो रही है`, body: `${v.store} को लगभग ${v.minutes} मिनट और लगेंगे।` }),
+    KN: (v) => ({ title: `${v.orderNumber} ತಡವಾಗುತ್ತಿದೆ`, body: `${v.store} ಗೆ ಇನ್ನೂ ಸುಮಾರು ${v.minutes} ನಿಮಿಷ ಬೇಕು.` }),
+  },
+  CUST_ITEM_OUT: {
+    EN: (v) => ({ title: `An item in ${v.orderNumber} is unavailable`, body: `${v.reason ?? 'One item was removed'}.${Number(v.refund) > 0 ? ` ${rs(v.refund)} is being refunded.` : ''}` }),
+    HI: (v) => ({ title: `${v.orderNumber} में एक आइटम उपलब्ध नहीं`, body: Number(v.refund) > 0 ? `${rs(v.refund)} वापस किया जा रहा है।` : 'एक आइटम हटाया गया।' }),
+    KN: (v) => ({ title: `${v.orderNumber} ನಲ್ಲಿ ಒಂದು ವಸ್ತು ಲಭ್ಯವಿಲ್ಲ`, body: Number(v.refund) > 0 ? `${rs(v.refund)} ಮರುಪಾವತಿ ಆಗುತ್ತಿದೆ.` : 'ಒಂದು ವಸ್ತುವನ್ನು ತೆಗೆಯಲಾಗಿದೆ.' }),
+  },
+  CUST_RX_OK: {
+    EN: (v) => ({ title: 'Prescription approved', body: `The pharmacist at ${v.store} checked it — ${v.orderNumber} is going to the counter.` }),
+    HI: (v) => ({ title: 'पर्चा स्वीकृत', body: `${v.store} के फार्मासिस्ट ने जाँच लिया — ${v.orderNumber} तैयार होगा।` }),
+    KN: (v) => ({ title: 'ಪ್ರಿಸ್ಕ್ರಿಪ್ಷನ್ ಅನುಮೋದನೆ', body: `${v.store} ಫಾರ್ಮಸಿಸ್ಟ್ ಪರಿಶೀಲಿಸಿದ್ದಾರೆ — ${v.orderNumber} ತಯಾರಾಗುತ್ತದೆ.` }),
+  },
+  CUST_SUB_OFFER: {
+    EN: (v) => ({ title: `${v.store} suggests a replacement`, body: `${v.reason ?? 'An item ran out'}. Accept or decline within 5 minutes.` }),
+    HI: (v) => ({ title: `${v.store} ने बदले में दूसरा आइटम सुझाया`, body: `${v.reason ?? 'एक आइटम खत्म हो गया'}। 5 मिनट में हाँ या ना कहें।` }),
+    KN: (v) => ({ title: `${v.store} ಬದಲಿ ವಸ್ತು ಸೂಚಿಸಿದೆ`, body: `${v.reason ?? 'ಒಂದು ವಸ್ತು ಖಾಲಿಯಾಗಿದೆ'}. 5 ನಿಮಿಷದಲ್ಲಿ ಒಪ್ಪಿ ಅಥವಾ ನಿರಾಕರಿಸಿ.` }),
+  },
+  CUST_LAB_CONFIRMED: {
+    EN: (v) => ({ title: 'Lab booking confirmed', body: `${v.store} confirmed ${v.bookingNumber}.` }),
+    HI: (v) => ({ title: 'लैब बुकिंग पक्की', body: `${v.store} ने ${v.bookingNumber} पक्की की।` }),
+    KN: (v) => ({ title: 'ಲ್ಯಾಬ್ ಬುಕಿಂಗ್ ಖಚಿತ', body: `${v.store} ${v.bookingNumber} ಖಚಿತಪಡಿಸಿದೆ.` }),
+  },
+  CUST_LAB_REJECTED: {
+    EN: (v) => ({ title: 'Lab booking not accepted', body: `${v.bookingNumber}: ${v.reason ?? 'the lab couldn’t take it'}. Any payment is refunded.` }),
+    HI: (v) => ({ title: 'लैब बुकिंग स्वीकार नहीं हुई', body: `${v.bookingNumber}: ${v.reason ?? 'लैब इसे नहीं ले सकी'}।` }),
+    KN: (v) => ({ title: 'ಲ್ಯಾಬ್ ಬುಕಿಂಗ್ ಸ್ವೀಕರಿಸಿಲ್ಲ', body: `${v.bookingNumber}: ${v.reason ?? 'ಲ್ಯಾಬ್ ಇದನ್ನು ತೆಗೆದುಕೊಳ್ಳಲಾಗಲಿಲ್ಲ'}.` }),
+  },
+  CUST_LAB_COLLECTOR: {
+    EN: (v) => ({ title: 'Sample collector assigned', body: `${v.store} assigned someone for ${v.bookingNumber}. Keep your booking code ready.` }),
+    HI: (v) => ({ title: 'सैंपल लेने वाला तय हुआ', body: `${v.bookingNumber} के लिए ${v.store} ने किसी को भेजा है। बुकिंग कोड तैयार रखें।` }),
+    KN: (v) => ({ title: 'ಮಾದರಿ ಸಂಗ್ರಾಹಕರು ನಿಯೋಜಿತ', body: `${v.bookingNumber} ಗೆ ${v.store} ಒಬ್ಬರನ್ನು ಕಳುಹಿಸಿದೆ. ಬುಕಿಂಗ್ ಕೋಡ್ ಸಿದ್ಧವಿಡಿ.` }),
+  },
+  CUST_LAB_REPORT: {
+    EN: (v) => ({ title: 'Your lab report is ready', body: `${v.bookingNumber} · open the app to view it.` }),
+    HI: (v) => ({ title: 'आपकी लैब रिपोर्ट तैयार है', body: `${v.bookingNumber} · देखने के लिए ऐप खोलें।` }),
+    KN: (v) => ({ title: 'ನಿಮ್ಮ ಲ್ಯಾಬ್ ವರದಿ ಸಿದ್ಧ', body: `${v.bookingNumber} · ನೋಡಲು ಆ್ಯಪ್ ತೆರೆಯಿರಿ.` }),
   },
   // ---- Partners: account
   DOC_VERIFIED: {

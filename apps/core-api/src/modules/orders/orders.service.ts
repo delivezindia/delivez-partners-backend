@@ -48,7 +48,12 @@ export interface CreateOrderInput {
   rxSeenByStore?: boolean;
   /** Dev simulator only: pretend the order was placed earlier (to exercise the timeout job). */
   placedSecondsAgo?: number;
+  /** Online payment through the gateway: the order waits as DRAFT (stock held, shop not told) until confirmPayment. */
+  awaitPayment?: boolean;
 }
+
+/** An unpaid DRAFT is released after this long (the gateway checkout itself times out sooner). */
+export const PAYMENT_WINDOW_MINUTES = 15;
 
 export type OrderTab = 'RX' | 'NEW' | 'PREPARING' | 'READY' | 'DONE' | 'CANCELLED' | 'ALL';
 export const TAB_STATES: Record<Exclude<OrderTab, 'ALL'>, OrderStatus[]> = {
@@ -145,6 +150,8 @@ export class OrdersService {
       const packagingFee = store.vertical === 'EAT' && input.channel !== 'LOCAL_WEB' ? store.packagingFee : 0;
       const grandTotal = itemsSubtotal + deliveryFee + packagingFee;
       const paid = input.paymentMode !== 'COD';
+      // Prescription orders are paid first too; the pharmacist sees them once the money is in (confirmPayment).
+      const draft = !!input.awaitPayment && paid;
 
       const order = await tx.order.create({
         data: {
@@ -154,7 +161,7 @@ export class OrdersService {
           vertical: store.vertical,
           channel: input.channel,
           fulfilmentType: input.fulfilmentType,
-          status: awaitingRx ? 'AWAITING_RX_REVIEW' : 'PLACED',
+          status: draft ? 'DRAFT' : awaitingRx ? 'AWAITING_RX_REVIEW' : 'PLACED',
           prescriptionId,
           deliveryAddress: input.address ? { ...input.address, contactName: input.address.contactName ?? input.customer.name ?? null, contactPhone: input.address.contactPhone ?? customer.phone } : undefined,
           addressId: input.addressId,
@@ -164,8 +171,8 @@ export class OrdersService {
           packagingFee,
           grandTotal,
           paymentMode: input.paymentMode,
-          paymentStatus: paid ? 'CAPTURED' : 'COD_PENDING',
-          placedAt,
+          paymentStatus: draft ? 'PENDING' : paid ? 'CAPTURED' : 'COD_PENDING',
+          placedAt: draft ? null : placedAt,
           // Dev simulator backdating moves the whole order, so the prescription review timeout can be tested too.
           ...(input.placedSecondsAgo ? { createdAt: placedAt } : {}),
           promisedDeliveryAt: new Date(placedAt.getTime() + (store.defaultPrepMinutes + (input.fulfilmentType === 'DELIVERY' ? travelMinutes(distanceKm) : 0)) * 60_000),
@@ -180,10 +187,10 @@ export class OrdersService {
               provider: paid ? 'RAZORPAY' : 'COD',
               amount: grandTotal,
               method: input.paymentMode,
-              status: paid ? 'CAPTURED' : 'COD_PENDING',
-              capturedAt: paid ? new Date() : null,
-              // Simulated until the payments module is integrated.
-              rawPayload: paid ? { simulated: true } : undefined,
+              status: draft ? 'PENDING' : paid ? 'CAPTURED' : 'COD_PENDING',
+              capturedAt: paid && !draft ? new Date() : null,
+              // Without the gateway (dev, partner-typed orders) an online payment is recorded as simulated.
+              rawPayload: paid && !draft ? { simulated: true } : undefined,
             },
           },
         },
@@ -199,6 +206,7 @@ export class OrdersService {
       }
 
       await tx.orderStatusEvent.create({ data: { orderId: order.id, toState: order.status, actorType: actor.kind, actorId: actor.userId, meta: { channel: input.channel, ...rxMeta } as Prisma.InputJsonValue } });
+      if (draft) return order; // the shop hears about it once it is paid (confirmPayment)
       await this.events.publish(tx, {
         type: awaitingRx ? 'order.rx_submitted' : 'order.placed',
         data: {
@@ -219,7 +227,9 @@ export class OrdersService {
       return order;
     });
 
-    if (awaitingRx) {
+    if (created.status === 'DRAFT') {
+      // Waits for the payment.
+    } else if (awaitingRx) {
       // Waits for the pharmacist; the store sees it as a new order once the prescription is approved.
     } else if (input.startAccepted) {
       await this.state.transition(created.id, 'ACCEPT', actor.kind === 'PARTNER' ? actor : { kind: 'SYSTEM' }, { prepMinutes: input.startAccepted.prepMinutes, meta: { storeCreated: true } });
@@ -227,6 +237,65 @@ export class OrdersService {
       await this.state.transition(created.id, 'ACCEPT', { kind: 'SYSTEM' }, { meta: { autoAccept: true } });
     }
     return this.detailById(created.id);
+  }
+
+  /**
+   * The gateway confirmed the money: DRAFT → PLACED, the shop is told (order.placed) and its accept timer starts now.
+   * Safe to call twice (verify call + webhook) — only the first one moves the order.
+   */
+  async confirmPayment(orderId: string, p: { providerPaymentId: string; method?: PaymentMode; raw: Prisma.InputJsonValue }) {
+    const placed = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`;
+      const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { store: true, items: true } });
+      if (o.status !== 'DRAFT') return null;
+      const now = new Date();
+      const prep = o.store.defaultPrepMinutes + (o.fulfilmentType === 'DELIVERY' ? travelMinutes(o.deliveryDistanceKm) : 0);
+      // Prescription orders go to the pharmacist next; the review clock (createdAt + 15 min) starts at payment.
+      const rx = !!o.prescriptionId;
+      const to = rx ? 'AWAITING_RX_REVIEW' : 'PLACED';
+      await tx.order.update({ where: { id: o.id }, data: { status: to, paymentStatus: 'CAPTURED', placedAt: now, promisedDeliveryAt: new Date(now.getTime() + prep * 60_000), ...(rx ? { createdAt: now } : {}), ...(p.method ? { paymentMode: p.method } : {}) } });
+      await tx.payment.updateMany({ where: { orderId: o.id, status: 'PENDING' }, data: { status: 'CAPTURED', capturedAt: now, providerPaymentId: p.providerPaymentId, rawPayload: p.raw, ...(p.method ? { method: p.method } : {}) } });
+      await tx.orderStatusEvent.create({ data: { orderId: o.id, fromState: 'DRAFT', toState: to, actorType: 'SYSTEM', reason: 'Payment received', meta: { providerPaymentId: p.providerPaymentId } } });
+      if (rx) {
+        await this.events.publish(tx, {
+          type: 'order.rx_submitted',
+          data: { storeId: o.storeId, orderId: o.id, orderNumber: o.orderNumber, itemCount: o.items.reduce((s, i) => s + i.qty, 0), grandTotal: o.grandTotal, fulfilmentType: o.fulfilmentType, isTestOrder: o.isTestOrder, reviewMinutes: RX_REVIEW_MINUTES, reviewBy: new Date(now.getTime() + RX_REVIEW_MINUTES * 60_000).toISOString() },
+          actor: { type: 'SYSTEM' },
+        });
+        return { ...o, rx };
+      }
+      await this.events.publish(tx, {
+        type: 'order.placed',
+        data: {
+          storeId: o.storeId,
+          orderId: o.id,
+          orderNumber: o.orderNumber,
+          itemCount: o.items.reduce((s, i) => s + i.qty, 0),
+          grandTotal: o.grandTotal,
+          fulfilmentType: o.fulfilmentType,
+          isTestOrder: o.isTestOrder,
+          acceptBy: new Date(now.getTime() + ACCEPT_TIMEOUT_SECONDS * 1000).toISOString(),
+        },
+        actor: { type: 'SYSTEM' },
+      });
+      return { ...o, rx };
+    });
+    if (placed?.store.autoAcceptOrders && !placed.rx) await this.state.transition(placed.id, 'ACCEPT', { kind: 'SYSTEM' }, { meta: { autoAccept: true } });
+    return !!placed;
+  }
+
+  /** An unpaid DRAFT is dropped: held stock goes back, nobody is notified (the shop never saw it). */
+  async releaseDraft(orderId: string, reason: string, actor: OrderActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`;
+      const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { items: true, deliveryTask: true, store: true } });
+      if (o.status !== 'DRAFT') return false;
+      await this.state.release(tx, o, actor);
+      await tx.order.update({ where: { id: o.id }, data: { status: 'CANCELLED', paymentStatus: 'FAILED', cancelledAt: new Date(), cancelReason: reason } });
+      await tx.payment.updateMany({ where: { orderId: o.id, status: 'PENDING' }, data: { status: 'FAILED', failureReason: reason } });
+      await tx.orderStatusEvent.create({ data: { orderId: o.id, fromState: 'DRAFT', toState: 'CANCELLED', actorType: actor.kind, actorId: actor.userId, reason } });
+      return true;
+    });
   }
 
   private async price(tx: Prisma.TransactionClient, storeId: string, vertical: string, items: ItemInput[]) {

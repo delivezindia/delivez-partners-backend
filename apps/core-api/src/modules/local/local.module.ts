@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Module, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Module, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import type { AuthUser } from '../../common/request-context';
@@ -8,7 +8,14 @@ import { LocalAccountService } from './local-account.service';
 import { LocalStoresService } from './local-stores.service';
 import { LocalOrdersService, ONLINE_METHODS } from './local-orders.service';
 import { OrdersModule } from '../orders/orders.module';
+import { PaymentsModule } from '../payments/payments.module';
 import { RequireIdempotency } from '../../common/idempotency.interceptor';
+import { LabBookingsModule } from '../lab-bookings/lab-bookings.module';
+import { SupportModule } from '../support/support.module';
+import { CUSTOMER_CATEGORIES, SupportService } from '../support/support.service';
+import { RETURN_REASONS } from '../orders/returns-rules';
+import { LocalLabsService } from './local-labs.service';
+import { REVIEW_TAGS } from './local-orders.service';
 
 const VERTICALS = ['EAT', 'GROCERY', 'PHARMACY', 'DIAGNOSTICS', 'LOCAL_STORES'] as const;
 const lat = z.coerce.number().min(6).max(38);
@@ -58,26 +65,65 @@ const quoteSchema = z.object({
   fulfilmentType: z.literal('DELIVERY').default('DELIVERY'),
   addressId: z.string().uuid().optional(),
   items: z.array(itemSchema).min(1, 'Your cart is empty').max(50),
+  prescriptionFileKeys: z.array(z.string().max(200)).max(5).optional(),
 });
 const checkoutSchema = quoteSchema.extend({
   // Online only — no cash on delivery for app orders.
   paymentMode: z.enum(ONLINE_METHODS),
   note: z.string().trim().max(300).optional(),
 });
+const verifySchema = z.object({ razorpay_order_id: z.string().min(5).max(64), razorpay_payment_id: z.string().min(5).max(64), razorpay_signature: z.string().min(16).max(256) });
 const cancelSchema = z.object({
   reason: z.string().trim().max(200).optional(),
 });
+const uploadSchema = z.object({ contentType: z.enum(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']), size: z.number().int().positive().max(10 * 1024 * 1024) });
+const subAnswerSchema = z.object({ accept: z.boolean() });
+const returnSchema = z.object({
+  items: z.array(z.object({ itemId: z.string().uuid(), qty: z.number().int().min(1).max(50), reason: z.enum(RETURN_REASONS) })).min(1, 'Pick at least one item').max(50),
+  note: z.string().trim().max(300).optional(),
+});
+const reviewSchema = z.object({ rating: z.number().int().min(1).max(5), comment: z.string().trim().max(500).optional(), tags: z.array(z.enum(REVIEW_TAGS)).max(8).optional() });
+const slotsQuery = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), type: z.enum(['HOME', 'WALK_IN']) });
+const labBookSchema = z
+  .object({
+    storeId: z.string().uuid(),
+    collectionType: z.enum(['HOME', 'WALK_IN']),
+    slotStart: z.coerce.date(),
+    testIds: z.array(z.string().uuid()).min(1, 'Pick at least one test').max(30),
+    patient: z.object({ name: z.string().trim().min(2, 'Enter the patient’s name').max(80), age: z.number().int().min(0).max(120).optional(), gender: z.enum(['F', 'M', 'O']).optional() }),
+    addressId: z.string().uuid().optional(),
+    note: z.string().trim().max(300).optional(),
+    prescriptionFileKeys: z.array(z.string().max(200)).max(5).optional(),
+  })
+  .refine((v) => v.collectionType !== 'HOME' || !!v.addressId, { message: 'Choose the address for sample collection', path: ['addressId'] });
+const rescheduleSchema = z.object({ slotStart: z.coerce.date() });
+const ticketSchema = z.object({
+  category: z.enum(CUSTOMER_CATEGORIES),
+  subject: z.string().trim().min(3, 'Add a short title').max(120),
+  message: z.string().trim().min(5, 'Tell us a little more').max(2000),
+  orderId: z.string().uuid().optional(),
+});
+const replySchema = z.object({ body: z.string().trim().min(1).max(2000) });
 
 /** Browsing — no login needed. */
 @ApiTags('local')
 @Public()
 @Controller('local/stores')
 export class LocalStoresController {
-  constructor(private readonly stores: LocalStoresService) {}
+  constructor(
+    private readonly stores: LocalStoresService,
+    private readonly labs: LocalLabsService,
+  ) {}
 
   @Get()
   nearby(@Query(new ZodValidationPipe(nearbyQuery)) q: z.infer<typeof nearbyQuery>) {
     return this.stores.nearby(q);
+  }
+
+  /** Hourly slots at a lab (home collection or walk-in) for one day. */
+  @Get(':idOrSlug/lab-slots')
+  labSlots(@Param('idOrSlug') idOrSlug: string, @Query(new ZodValidationPipe(slotsQuery)) q: z.infer<typeof slotsQuery>) {
+    return this.labs.slots(idOrSlug, q.date, q.type);
   }
 
   @Get(':idOrSlug')
@@ -167,16 +213,139 @@ export class LocalOrdersController {
     return this.orders.detail(u.userId, id);
   }
 
+  @Post('orders/:id/payment')
+  payment(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.orders.payment(u.userId, id);
+  }
+
+  @Post('orders/:id/payment/verify')
+  verify(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(verifySchema)) b: z.infer<typeof verifySchema>) {
+    return this.orders.verifyPayment(u.userId, id, b);
+  }
+
   @Post('orders/:id/cancel')
   cancel(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(cancelSchema)) b: z.infer<typeof cancelSchema>) {
     return this.orders.cancel(u.userId, id, b.reason);
   }
+
+  /** Upload link for a prescription (pharmacy orders). */
+  @Post('pharmacies/:storeId/rx-upload')
+  rxUpload(@CurrentUser() u: AuthUser, @Param('storeId', ParseUUIDPipe) storeId: string, @Body(new ZodValidationPipe(uploadSchema)) b: z.infer<typeof uploadSchema>) {
+    return this.orders.rxUpload(u.userId, storeId, b.contentType, b.size);
+  }
+
+  @Post('orders/:id/substitutions/:subId')
+  @HttpCode(200)
+  substitution(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Param('subId', ParseUUIDPipe) subId: string, @Body(new ZodValidationPipe(subAnswerSchema)) b: z.infer<typeof subAnswerSchema>) {
+    return this.orders.respondSubstitution(u.userId, id, subId, b.accept);
+  }
+
+  @Post('orders/:id/returns')
+  @RequireIdempotency()
+  returnItems(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(returnSchema)) b: z.infer<typeof returnSchema>) {
+    return this.orders.returnItems(u.userId, id, b.items, b.note);
+  }
+
+  @Post('orders/:id/returns/keep')
+  @HttpCode(200)
+  keepAll(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.orders.keepAll(u.userId, id);
+  }
+
+  @Post('orders/:id/review')
+  review(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(reviewSchema)) b: z.infer<typeof reviewSchema>) {
+    return this.orders.review(u.userId, id, b);
+  }
+}
+
+/** Lab tests: book a slot, track it, open the report. */
+@ApiTags('local')
+@ApiBearerAuth()
+@Apps('LOCAL')
+@Controller('local')
+export class LocalLabsController {
+  constructor(private readonly labs: LocalLabsService) {}
+
+  @Post('labs/:storeId/rx-upload')
+  rxUpload(@CurrentUser() u: AuthUser, @Param('storeId', ParseUUIDPipe) storeId: string, @Body(new ZodValidationPipe(uploadSchema)) b: z.infer<typeof uploadSchema>) {
+    return this.labs.rxUpload(u.userId, storeId, b.contentType, b.size);
+  }
+
+  @Post('lab-bookings')
+  @RequireIdempotency()
+  book(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(labBookSchema)) b: z.infer<typeof labBookSchema>) {
+    return this.labs.book(u.userId, b);
+  }
+
+  @Get('lab-bookings')
+  list(@CurrentUser() u: AuthUser) {
+    return this.labs.list(u.userId);
+  }
+
+  @Get('lab-bookings/:id')
+  detail(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.labs.detail(u.userId, id);
+  }
+
+  @Post('lab-bookings/:id/cancel')
+  @HttpCode(200)
+  cancel(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(cancelSchema)) b: z.infer<typeof cancelSchema>) {
+    return this.labs.cancel(u.userId, id, b.reason);
+  }
+
+  @Post('lab-bookings/:id/reschedule')
+  @HttpCode(200)
+  reschedule(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(rescheduleSchema)) b: z.infer<typeof rescheduleSchema>) {
+    return this.labs.reschedule(u.userId, id, b.slotStart);
+  }
+
+  @Get('lab-bookings/:id/reports/:reportId')
+  report(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Param('reportId', ParseUUIDPipe) reportId: string) {
+    return this.labs.report(u.userId, id, reportId);
+  }
+}
+
+/** Help: the customer's tickets with Delivez support. */
+@ApiTags('local')
+@ApiBearerAuth()
+@Apps('LOCAL')
+@Controller('local/support')
+export class LocalSupportController {
+  constructor(private readonly support: SupportService) {}
+
+  @Get()
+  list(@CurrentUser() u: AuthUser) {
+    return this.support.customerList(u.userId);
+  }
+
+  @Post()
+  @RequireIdempotency()
+  create(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(ticketSchema)) b: z.infer<typeof ticketSchema>) {
+    return this.support.customerCreate(u.userId, b);
+  }
+
+  @Get(':id')
+  get(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.support.customerGet(u.userId, id);
+  }
+
+  @Post(':id/reply')
+  @HttpCode(200)
+  reply(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(replySchema)) b: z.infer<typeof replySchema>) {
+    return this.support.customerReply(u.userId, id, b.body);
+  }
+
+  @Post(':id/resolve')
+  @HttpCode(200)
+  resolve(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.support.customerResolve(u.userId, id);
+  }
 }
 
 @Module({
-  imports: [OrdersModule],
-  controllers: [LocalStoresController, LocalAccountController, LocalOrdersController],
-  providers: [LocalStoresService, LocalAccountService, LocalOrdersService],
+  imports: [OrdersModule, PaymentsModule, LabBookingsModule, SupportModule],
+  controllers: [LocalStoresController, LocalAccountController, LocalOrdersController, LocalLabsController, LocalSupportController],
+  providers: [LocalStoresService, LocalAccountService, LocalOrdersService, LocalLabsService],
   exports: [LocalAccountService],
 })
 export class LocalModule {}

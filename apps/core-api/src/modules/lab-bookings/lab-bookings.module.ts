@@ -10,5 +10,6 @@ import { LabSimulatorService } from './lab-simulator.service';
   imports: [PartnersModule, FilesModule],
   controllers: [PartnerLabBookingsController, DevLabBookingsController, AdminLabBookingsController],
   providers: [LabBookingsService, LabSimulatorService, AdminGuard],
+  exports: [LabBookingsService],
 })
 export class LabBookingsModule {}

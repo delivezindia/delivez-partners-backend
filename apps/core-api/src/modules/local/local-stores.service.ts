@@ -197,6 +197,8 @@ export class LocalStoresService {
         busy: s.openState === 'BUSY',
         opensAt: s.openState === 'CLOSED' ? opening(nextOpening(s.timings, now)) : null,
         supportsDelivery: s.supportsDelivery,
+        supportsPickup: s.supportsPickup,
+        collectionFee: s.vertical === 'DIAGNOSTICS' ? s.collectionFee : 0,
         distanceKm: km,
         delivers: km == null ? null : s.supportsDelivery && km <= radius,
         etaMinutes: s.defaultPrepMinutes + (s.openState === 'BUSY' ? 10 : 0) + (km != null ? travelMinutes(km) : 0),

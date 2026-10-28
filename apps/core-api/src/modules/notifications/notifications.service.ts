@@ -35,6 +35,31 @@ interface Outgoing {
 const OWNER_SMS: Outgoing['offApp'] = { channels: ['SMS'], roles: ['OWNER'] };
 const OWNER_WA: Outgoing['offApp'] = { channels: ['WHATSAPP'], roles: ['OWNER'] };
 const OWNER_BOTH: Outgoing['offApp'] = { channels: ['SMS', 'WHATSAPP'], roles: ['OWNER'] };
+/** Order events the customer hears about (picked_up, not out_for_delivery: dispatch fires both back to back). */
+const CUSTOMER_CODE: Record<string, string> = {
+  'order.accepted': 'CUST_ACCEPTED',
+  'order.rejected': 'CUST_REJECTED',
+  'order.rx_rejected': 'CUST_REJECTED',
+  'order.picked_up': 'CUST_ON_WAY',
+  'order.arrived': 'CUST_ARRIVED',
+  'order.delivered': 'CUST_DELIVERED',
+  'order.cancelled': 'CUST_CANCELLED',
+  'order.delivery_failed': 'CUST_FAILED',
+  'order.delayed': 'CUST_DELAYED',
+  'order.item_unavailable': 'CUST_ITEM_OUT',
+  'order.rx_approved': 'CUST_RX_OK',
+  'order.substitution_proposed': 'CUST_SUB_OFFER',
+};
+/** Lab bookings made in the customer app (no test names in pushes — health data). */
+const CUSTOMER_LAB_CODE: Record<string, string> = {
+  'lab.booking_confirmed': 'CUST_LAB_CONFIRMED',
+  'lab.booking_rx_approved': 'CUST_LAB_CONFIRMED',
+  'lab.booking_rejected': 'CUST_LAB_REJECTED',
+  'lab.booking_rx_rejected': 'CUST_LAB_REJECTED',
+  'lab.booking_collector_assigned': 'CUST_LAB_COLLECTOR',
+  'lab.report_released': 'CUST_LAB_REPORT',
+  'lab.report_amended': 'CUST_LAB_REPORT',
+};
 const APP_URL = () => process.env.PARTNERS_WEB_URL ?? 'http://localhost:5173';
 
 /**
@@ -106,6 +131,34 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   // ------------------------------------------------------------------
 
   async handle(e: DomainEvent) {
+    await Promise.all([this.forTeam(e), this.forCustomer(e)]);
+  }
+
+  /** Customer app (LOCAL): order progress the customer did not cause themselves. */
+  private async forCustomer(e: DomainEvent) {
+    const d = e.data as Record<string, any>;
+    const labCode = CUSTOMER_LAB_CODE[e.type];
+    if (labCode && d.bookingId && e.actor?.type !== 'CUSTOMER') {
+      const b = await this.prisma.labBooking.findUnique({ where: { id: d.bookingId }, select: { channel: true, store: { select: { name: true } }, customer: { select: { user: { select: { id: true, language: true } } } } } });
+      if (!b || b.channel !== 'LOCAL_WEB') return;
+      return this.deliver(e, [{ userId: b.customer.user.id, language: b.customer.user.language }], { app: 'LOCAL', code: labCode, vars: { bookingNumber: d.bookingNumber, store: b.store.name, reason: d.reason }, url: `/bookings/${d.bookingId}`, tag: `lab-${d.bookingId}`, storeId: d.storeId });
+    }
+    const code = CUSTOMER_CODE[e.type];
+    if (!code || !d.orderId || e.actor?.type === 'CUSTOMER') return;
+    const o = await this.prisma.order.findUnique({ where: { id: d.orderId }, select: { channel: true, store: { select: { name: true } }, customer: { select: { user: { select: { id: true, language: true } } } } } });
+    if (!o || o.channel === 'PARTNER_MANUAL' || !o.customer?.user) return;
+    return this.deliver(e, [{ userId: o.customer.user.id, language: o.customer.user.language }], {
+      app: 'LOCAL',
+      code,
+      vars: { orderNumber: d.orderNumber, store: o.store.name, minutes: d.prepMinutes ?? d.delayMinutes, refund: d.refund, reason: d.reason },
+      url: `/orders/${d.orderId}`,
+      tag: `order-${d.orderId}`,
+      urgent: code === 'CUST_ARRIVED',
+      storeId: d.storeId,
+    });
+  }
+
+  private async forTeam(e: DomainEvent) {
     const d = e.data as Record<string, any>;
     const byPartner = e.actor?.type === 'PARTNER';
     const storeId: string | undefined = d.storeId;
@@ -129,6 +182,10 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       case 'order.cancelled':
         if (byPartner) return;
         return this.toStore(e, storeId!, ORDER_ROLES, { app: 'PARTNERS', code: 'ORDER_CANCELLED', vars: { orderNumber: d.orderNumber, reason: d.reason, comp: d.storeCompensation }, url: orders(d.orderNumber), tag: `order-${d.orderId}`, urgent: true });
+      case 'order.substitution_accepted':
+      case 'order.substitution_declined':
+        if (byPartner) return;
+        return this.toStore(e, storeId!, ORDER_ROLES, { app: 'PARTNERS', code: e.type === 'order.substitution_accepted' ? 'SUB_ACCEPTED' : 'SUB_DECLINED', vars: { orderNumber: d.orderNumber, detail: d.reason, expired: d.expired ? 1 : 0 }, url: orders(d.orderNumber), tag: `order-${d.orderId}`, urgent: true });
       case 'order.delivery_failed':
         return this.toStore(e, storeId!, LEADS, { app: 'PARTNERS', code: 'DELIVERY_FAILED', vars: { orderNumber: d.orderNumber, reason: d.reason, comp: d.storeCompensation, back: d.goods === 'RETURN_TO_STORE' ? 1 : 0 }, url: orders(d.orderNumber), tag: `order-${d.orderId}`, urgent: true });
       case 'order.sla_breach': {
@@ -157,6 +214,9 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       case 'lab.booking_cancelled':
         if (byPartner) return;
         return this.toStore(e, storeId!, LAB_DESK, { app: 'PARTNERS', code: 'LAB_CANCELLED', vars: { bookingNumber: d.bookingNumber }, url: `/stores/${storeId}/bookings`, tag: `lab-${d.bookingId}` });
+      case 'lab.booking_rescheduled':
+        if (byPartner) return;
+        return this.toStore(e, storeId!, LAB_DESK, { app: 'PARTNERS', code: 'LAB_RESCHEDULED', vars: { bookingNumber: d.bookingNumber, when: slot(d.to) }, url: `/stores/${storeId}/bookings`, tag: `lab-${d.bookingId}` });
       case 'document.verified':
       case 'document.rejected': {
         if (!storeId) return;
@@ -186,6 +246,10 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         const u = await this.prisma.user.findUnique({ where: { id: d.raisedByUserId }, select: { id: true, language: true } });
         if (!u) return;
         const resolved = e.type === 'support.resolved' || d.status === 'RESOLVED';
+        const t = await this.prisma.supportTicket.findUnique({ where: { id: d.ticketId }, select: { raisedByType: true } });
+        if (t?.raisedByType === 'CUSTOMER') {
+          return this.deliver(e, [{ userId: u.id, language: u.language }], { app: 'LOCAL', code: resolved ? 'SUPPORT_RESOLVED' : 'SUPPORT_REPLY', vars: { ticket: d.ticketNumber, subject: d.subject }, url: `/help/${d.ticketId}`, tag: `ticket-${d.ticketId}`, storeId });
+        }
         return this.deliver(e, [{ userId: u.id, language: u.language }], { app: 'PARTNERS', code: resolved ? 'SUPPORT_RESOLVED' : 'SUPPORT_REPLY', vars: { ticket: d.ticketNumber, subject: d.subject }, url: `/stores/${storeId}/help?ticket=${d.ticketId}`, tag: `ticket-${d.ticketId}`, storeId });
       }
 
@@ -244,7 +308,8 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     const people = [...new Map(to.map((r) => [r.userId, r])).values()];
     if (!people.length) return [];
     if (e) {
-      const seen = await this.prisma.notification.findFirst({ where: { data: { path: ['eventId'], equals: e.id } }, select: { id: true } });
+      // Per event and template: one event can notify the shop and the customer.
+      const seen = await this.prisma.notification.findFirst({ where: { templateCode: out.code, data: { path: ['eventId'], equals: e.id } }, select: { id: true } });
       if (seen) return [];
     }
     return Promise.all(people.map((p) => this.deliverOne(e, p, out)));

@@ -10,7 +10,8 @@ import { docsBasicAuth, docsMode, DOCS_PATHS } from './common/docs-auth';
 import { BUILD } from './common/version';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: the Razorpay webhook signs the exact bytes it sends.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   app.setGlobalPrefix('v1');
   // Frontends on other domains: list them in CORS_ORIGINS (localhost is always allowed for dev).
   app.enableCors({ origin: corsOrigin, credentials: true });

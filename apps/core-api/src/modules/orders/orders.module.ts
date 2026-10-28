@@ -20,6 +20,6 @@ import { OpsAlertsService } from './ops-alerts.service';
   imports: [PartnersModule, FilesModule, NotificationsModule],
   controllers: [PartnerOrdersController, DevOrdersController, AdminOrdersController, OrderReportsController, OpsAlertsController],
   providers: [OrderStateService, OrdersService, DispatchService, SimulatorService, SubstitutionsService, ReturnsService, OpsAlertsService, OrderJobsScheduler, OrderReportsService, AdminGuard],
-  exports: [OrderStateService, OrdersService, OrderReportsService, SimulatorService],
+  exports: [OrderStateService, OrdersService, OrderReportsService, SimulatorService, SubstitutionsService, ReturnsService],
 })
 export class OrdersModule {}

@@ -48,12 +48,12 @@ export class ReturnsService {
             note,
             status: line.reason === 'MISSING' ? 'NOT_APPLICABLE' : 'WITH_RIDER',
             refundMethod: cash ? 'CASH_AT_DOOR' : 'ONLINE',
-            createdByType: actor.kind === 'RIDER' ? 'RIDER' : 'ADMIN',
+            createdByType: actor.kind === 'RIDER' || actor.kind === 'CUSTOMER' ? actor.kind : 'ADMIN',
             createdByUserId: actor.userId,
           },
         });
         await tx.refund.create({
-          data: { orderId, paymentId: payment?.id, amount: line.amount, reason: `${item.productName} returned at the door (${line.reason.toLowerCase().replace('_', ' ')})`, initiatedBy: actor.kind === 'RIDER' ? 'RIDER' : 'ADMIN', ...(cash ? { status: 'PROCESSED', processedAt: now } : {}) },
+          data: { orderId, paymentId: payment?.id, amount: line.amount, reason: `${item.productName} returned at the door (${line.reason.toLowerCase().replace('_', ' ')})`, initiatedBy: actor.kind === 'RIDER' || actor.kind === 'CUSTOMER' ? actor.kind : 'ADMIN', ...(cash ? { status: 'PROCESSED', processedAt: now } : {}) },
         });
       }
       // The bill (and so sales reports and GST) shrink by what came back.

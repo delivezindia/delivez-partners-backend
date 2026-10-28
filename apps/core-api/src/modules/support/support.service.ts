@@ -8,6 +8,8 @@ import type { AdminContext } from '../admin/admin.guard';
 
 export const PARTNER_CATEGORIES = ['ORDER_ISSUE', 'PAYOUT', 'MENU', 'ACCOUNT', 'TECH', 'OTHER'] as const;
 export type PartnerCategory = (typeof PARTNER_CATEGORIES)[number];
+export const CUSTOMER_CATEGORIES = ['ORDER_ISSUE', 'MISSING_ITEM', 'PAYMENT_REFUND', 'MEDICINE', 'LAB_BOOKING', 'ACCOUNT', 'OTHER'] as const;
+export type CustomerCategory = (typeof CUSTOMER_CATEGORIES)[number];
 const OPEN_STATES: TicketStatus[] = ['OPEN', 'IN_PROGRESS', 'WAITING_ON_USER'];
 
 const INCLUDE = {
@@ -35,7 +37,7 @@ export class SupportService {
 
   /** Owners and managers see every ticket of the outlet; other staff see the ones they raised. */
   private partnerScope(storeId: string, viewer: { userId: string; role: PartnerRole }): Prisma.SupportTicketWhereInput {
-    return { storeId, ...(viewer.role === 'OWNER' || viewer.role === 'MANAGER' ? {} : { raisedByUserId: viewer.userId }) };
+    return { storeId, raisedByType: 'PARTNER', ...(viewer.role === 'OWNER' || viewer.role === 'MANAGER' ? {} : { raisedByUserId: viewer.userId }) };
   }
 
   async partnerList(storeId: string, viewer: { userId: string; role: PartnerRole }) {
@@ -99,6 +101,68 @@ export class SupportService {
   }
 
   // ------------------------------------------------------------------
+  // Customer side (Local app) — a customer sees only their own tickets
+  // ------------------------------------------------------------------
+
+  async customerList(userId: string) {
+    const rows = await this.prisma.supportTicket.findMany({ where: { raisedByUserId: userId, raisedByType: 'CUSTOMER' }, include: INCLUDE, orderBy: { lastMessageAt: 'desc' }, take: 100 });
+    return { tickets: rows.map((t) => ({ ...this.summary(t), store: t.store ? { name: t.store.name } : null })) };
+  }
+
+  async customerGet(userId: string, id: string) {
+    const t = await this.prisma.supportTicket.findFirst({ where: { id, raisedByUserId: userId, raisedByType: 'CUSTOMER' }, include: INCLUDE });
+    if (!t) throw new ApiError(HttpStatus.NOT_FOUND, 'TICKET_NOT_FOUND', 'Ticket not found');
+    return { ...this.view(t, false), store: t.store ? { name: t.store.name } : null };
+  }
+
+  async customerCreate(userId: string, input: { category: CustomerCategory; subject: string; message: string; orderId?: string }) {
+    let order: { id: string; storeId: string; orderNumber: string } | null = null;
+    if (input.orderId) {
+      order = await this.prisma.order.findFirst({ where: { id: input.orderId, customer: { userId } }, select: { id: true, storeId: true, orderNumber: true } });
+      if (!order) throw new ApiError(HttpStatus.NOT_FOUND, 'ORDER_NOT_FOUND', 'Order not found');
+    }
+    const store = order ? await this.prisma.store.findUniqueOrThrow({ where: { id: order.storeId }, select: { name: true, cityId: true } }) : null;
+    const t = await this.prisma.$transaction(async (tx) => {
+      const ticket = await tx.supportTicket.create({
+        data: {
+          ticketNumber: await this.newNumber(tx),
+          storeId: order?.storeId,
+          orderId: order?.id,
+          raisedByUserId: userId,
+          raisedByType: 'CUSTOMER',
+          category: input.category,
+          subject: input.subject,
+          // A problem with an order in progress or money is answered first.
+          priority: input.category === 'ACCOUNT' || input.category === 'OTHER' ? 'NORMAL' : 'HIGH',
+          messages: { create: { senderUserId: userId, body: input.message } },
+        },
+      });
+      await this.events.publish(tx, { type: 'support.ticket_created', data: { storeId: order?.storeId, ticketId: ticket.id, ticketNumber: ticket.ticketNumber, subject: input.subject, storeName: store ? `Customer · ${store.name}` : 'Customer', cityId: store?.cityId ?? null }, actor: { type: 'CUSTOMER', userId } });
+      return ticket;
+    });
+    return this.customerGet(userId, t.id);
+  }
+
+  async customerReply(userId: string, id: string, body: string) {
+    const t = await this.customerGet(userId, id);
+    if (t.status === 'CLOSED') throw new ApiError(HttpStatus.CONFLICT, 'TICKET_CLOSED', 'This ticket is closed — raise a new one');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.ticketMessage.create({ data: { ticketId: id, senderUserId: userId, body } });
+      await tx.supportTicket.update({ where: { id }, data: { lastMessageAt: new Date(), ...(t.status === 'RESOLVED' || t.status === 'WAITING_ON_USER' ? { status: 'OPEN', resolvedAt: null } : {}) } });
+      const row = await tx.supportTicket.findUniqueOrThrow({ where: { id }, select: { assignedAdminId: true, storeId: true, store: { select: { cityId: true, name: true } } } });
+      await this.events.publish(tx, { type: 'support.partner_replied', data: { storeId: row.storeId, ticketId: id, ticketNumber: t.number, subject: t.subject, storeName: row.store ? `Customer · ${row.store.name}` : 'Customer', cityId: row.store?.cityId, assignedAdminId: row.assignedAdminId }, actor: { type: 'CUSTOMER', userId } });
+    });
+    return this.customerGet(userId, id);
+  }
+
+  async customerResolve(userId: string, id: string) {
+    const t = await this.customerGet(userId, id);
+    if (!OPEN_STATES.includes(t.status as TicketStatus)) return t;
+    await this.prisma.supportTicket.update({ where: { id }, data: { status: 'RESOLVED', resolvedAt: new Date() } });
+    return this.customerGet(userId, id);
+  }
+
+  // ------------------------------------------------------------------
   // Admin side (city-scoped)
   // ------------------------------------------------------------------
 
@@ -114,14 +178,13 @@ export class SupportService {
       where: {
         ...this.adminScope(admin),
         ...status,
-        raisedByType: 'PARTNER',
         ...(search ? { OR: [{ ticketNumber: { contains: search, mode: 'insensitive' } }, { subject: { contains: search, mode: 'insensitive' } }, { store: { name: { contains: search, mode: 'insensitive' } } }] } : {}),
       },
       include: INCLUDE,
       orderBy: [{ lastMessageAt: 'desc' }],
       take: 200,
     });
-    const counts = await this.prisma.supportTicket.groupBy({ by: ['status'], where: { ...this.adminScope(admin), raisedByType: 'PARTNER' }, _count: { _all: true } });
+    const counts = await this.prisma.supportTicket.groupBy({ by: ['status'], where: this.adminScope(admin), _count: { _all: true } });
     const admins = await this.adminNames(rows.map((r) => r.assignedAdminId));
     return {
       tickets: rows.map((t) => ({ ...this.summary(t), store: t.store ? { id: t.store.id, name: t.store.name, city: t.store.city?.name ?? null } : null, assignedTo: t.assignedAdminId ? admins.get(t.assignedAdminId) ?? null : null })),
@@ -170,6 +233,7 @@ export class SupportService {
       id: t.id,
       number: t.ticketNumber,
       category: t.category,
+      raisedByType: t.raisedByType,
       subject: t.subject,
       status: t.status,
       priority: t.priority,
@@ -187,7 +251,7 @@ export class SupportService {
       raisedByUserId: t.raisedByUserId,
       resolvedAt: t.resolvedAt,
       // Shops see "Delivez support", not which admin wrote.
-      thread: t.messages.map((m) => ({ id: m.id, body: m.body, fromAdmin: m.fromAdmin, author: m.fromAdmin ? (forAdmin ? m.sender.fullName ?? 'Delivez support' : 'Delivez support') : m.sender.fullName ?? 'Shop', at: m.createdAt })),
+      thread: t.messages.map((m) => ({ id: m.id, body: m.body, fromAdmin: m.fromAdmin, author: m.fromAdmin ? (forAdmin ? m.sender.fullName ?? 'Delivez support' : 'Delivez support') : m.sender.fullName ?? (t.raisedByType === 'CUSTOMER' ? (forAdmin ? 'Customer' : 'You') : 'Shop'), at: m.createdAt })),
     };
   }
 
