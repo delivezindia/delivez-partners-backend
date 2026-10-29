@@ -13,11 +13,12 @@ import { SimulatorService } from './simulator.service';
 import { SubstitutionsService } from './substitutions.service';
 import { ReturnsService } from './returns.service';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CouponsModule } from '../coupons/coupons.module';
 import { OpsAlertsController } from './ops-alerts.controller';
 import { OpsAlertsService } from './ops-alerts.service';
 
 @Module({
-  imports: [PartnersModule, FilesModule, NotificationsModule],
+  imports: [PartnersModule, FilesModule, NotificationsModule, CouponsModule],
   controllers: [PartnerOrdersController, DevOrdersController, AdminOrdersController, OrderReportsController, OpsAlertsController],
   providers: [OrderStateService, OrdersService, DispatchService, SimulatorService, SubstitutionsService, ReturnsService, OpsAlertsService, OrderJobsScheduler, OrderReportsService, AdminGuard],
   exports: [OrderStateService, OrdersService, OrderReportsService, SimulatorService, SubstitutionsService, ReturnsService],

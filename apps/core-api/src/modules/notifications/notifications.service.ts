@@ -3,7 +3,8 @@ import type { AdminRole, AppId, PartnerRole, Prisma } from '@delivez/db';
 import { EventBus, type DomainEvent } from '../../events/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ROLES } from '../admin/admin.guard';
-import { MessagingService, type MessageChannel } from '../messaging/messaging.service';
+import { MessagingService } from '../messaging/messaging.service';
+import { sendOffApp, type OffApp } from './off-app';
 import { PushSender, type PushMessage } from './push-sender';
 import { render } from './templates';
 
@@ -28,8 +29,8 @@ interface Outgoing {
   urgent?: boolean;
   storeId?: string;
   extra?: Record<string, string>;
-  /** Also send by SMS / WhatsApp — only to these partner roles (owners by default), with a link into the app. */
-  offApp?: { channels: MessageChannel[]; roles?: PartnerRole[] };
+  /** Also send by SMS / WhatsApp, with a link into the app (see sendOffApp for who gets it). */
+  offApp?: OffApp;
 }
 
 const OWNER_SMS: Outgoing['offApp'] = { channels: ['SMS'], roles: ['OWNER'] };
@@ -57,10 +58,15 @@ const CUSTOMER_LAB_CODE: Record<string, string> = {
   'lab.booking_rejected': 'CUST_LAB_REJECTED',
   'lab.booking_rx_rejected': 'CUST_LAB_REJECTED',
   'lab.booking_collector_assigned': 'CUST_LAB_COLLECTOR',
+  'lab.booking_sample_collected': 'CUST_LAB_SAMPLE',
   'lab.report_released': 'CUST_LAB_REPORT',
   'lab.report_amended': 'CUST_LAB_REPORT',
 };
+/** The moments worth a text when the customer has no working push: the order is on, on its way, or off (money back). */
+const CUSTOMER_SMS = new Set(['CUST_ACCEPTED', 'CUST_ON_WAY', 'CUST_REJECTED', 'CUST_CANCELLED', 'CUST_FAILED', 'CUST_LAB_CONFIRMED', 'CUST_LAB_REJECTED', 'CUST_LAB_SAMPLE']);
+const customerSms = (code: string): Outgoing['offApp'] => (process.env.CUSTOMER_SMS_UPDATES !== 'false' && CUSTOMER_SMS.has(code) ? { channels: ['SMS'], whenNoPush: true } : undefined);
 const APP_URL = () => process.env.PARTNERS_WEB_URL ?? 'http://localhost:5173';
+const LOCAL_URL = () => process.env.LOCAL_WEB_URL ?? 'http://localhost:5175';
 
 /**
  * Step 12 — turns domain events into notifications: an inbox row per person (IN_APP),
@@ -139,15 +145,20 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     const d = e.data as Record<string, any>;
     const labCode = CUSTOMER_LAB_CODE[e.type];
     if (labCode && d.bookingId && e.actor?.type !== 'CUSTOMER') {
-      const b = await this.prisma.labBooking.findUnique({ where: { id: d.bookingId }, select: { channel: true, store: { select: { name: true } }, customer: { select: { user: { select: { id: true, language: true } } } } } });
+      const b = await this.prisma.labBooking.findUnique({ where: { id: d.bookingId }, select: { channel: true, store: { select: { name: true } }, customer: { select: { user: { select: { id: true, language: true, phone: true } } } } } });
       if (!b || b.channel !== 'LOCAL_WEB') return;
-      return this.deliver(e, [{ userId: b.customer.user.id, language: b.customer.user.language }], { app: 'LOCAL', code: labCode, vars: { bookingNumber: d.bookingNumber, store: b.store.name, reason: d.reason }, url: `/bookings/${d.bookingId}`, tag: `lab-${d.bookingId}`, storeId: d.storeId });
+      return this.deliver(e, [{ userId: b.customer.user.id, language: b.customer.user.language, phone: b.customer.user.phone }], { app: 'LOCAL', code: labCode, vars: { bookingNumber: d.bookingNumber, store: b.store.name, reason: d.reason }, url: `/bookings/${d.bookingId}`, tag: `lab-${d.bookingId}`, storeId: d.storeId, offApp: customerSms(labCode) });
+    }
+    if (e.type === 'review.replied') {
+      const o = await this.prisma.order.findUnique({ where: { id: d.orderId }, select: { store: { select: { name: true } }, customer: { select: { user: { select: { id: true, language: true } } } } } });
+      if (!o?.customer?.user) return;
+      return this.deliver(e, [{ userId: o.customer.user.id, language: o.customer.user.language }], { app: 'LOCAL', code: 'CUST_REVIEW_REPLY', vars: { orderNumber: d.orderNumber, store: o.store.name }, url: `/orders/${d.orderId}`, tag: `review-${d.reviewId}`, storeId: d.storeId });
     }
     const code = CUSTOMER_CODE[e.type];
     if (!code || !d.orderId || e.actor?.type === 'CUSTOMER') return;
-    const o = await this.prisma.order.findUnique({ where: { id: d.orderId }, select: { channel: true, store: { select: { name: true } }, customer: { select: { user: { select: { id: true, language: true } } } } } });
+    const o = await this.prisma.order.findUnique({ where: { id: d.orderId }, select: { channel: true, store: { select: { name: true } }, customer: { select: { user: { select: { id: true, language: true, phone: true } } } } } });
     if (!o || o.channel === 'PARTNER_MANUAL' || !o.customer?.user) return;
-    return this.deliver(e, [{ userId: o.customer.user.id, language: o.customer.user.language }], {
+    return this.deliver(e, [{ userId: o.customer.user.id, language: o.customer.user.language, phone: o.customer.user.phone }], {
       app: 'LOCAL',
       code,
       vars: { orderNumber: d.orderNumber, store: o.store.name, minutes: d.prepMinutes ?? d.delayMinutes, refund: d.refund, reason: d.reason },
@@ -155,6 +166,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       tag: `order-${d.orderId}`,
       urgent: code === 'CUST_ARRIVED',
       storeId: d.storeId,
+      offApp: customerSms(code),
     });
   }
 
@@ -208,6 +220,8 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         if (recent) return;
         return this.toStore(e, storeId!, ['OWNER', 'MANAGER', 'PHARMACIST'], { app: 'PARTNERS', code: 'LOW_STOCK', vars: { name: d.name, available: d.available }, url: `/stores/${storeId}/inventory`, tag: `stock-${d.productId}`, extra: { productId: d.productId } });
       }
+      case 'review.created':
+        return this.toStore(e, storeId!, LEADS, { app: 'PARTNERS', code: 'NEW_REVIEW', vars: { orderNumber: d.orderNumber, rating: d.rating, comment: d.hasComment ? 1 : 0 }, url: `/stores/${storeId}/reviews`, tag: `review-${d.reviewId}`, urgent: d.rating <= 2 });
       case 'lab.booking_created':
         if (byPartner) return;
         return this.toStore(e, storeId!, LAB_DESK, { app: 'PARTNERS', code: 'LAB_BOOKING', vars: { bookingNumber: d.bookingNumber, type: d.collectionType, rx: d.rxRequired ? 1 : 0, when: slot(d.slotStart) }, url: `/stores/${storeId}/bookings`, tag: `lab-${d.bookingId}`, urgent: true });
@@ -324,15 +338,6 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       return n;
     });
 
-    if (out.offApp && p.phone && (!out.offApp.roles || (p.role && out.offApp.roles.includes(p.role)))) {
-      const text = `Delivez: ${title}. ${body} ${APP_URL()}${out.url}`;
-      for (const channel of out.offApp.channels) {
-        // Emoji turn an SMS into costlier Unicode and DLT templates reject them; WhatsApp keeps them.
-        const msg = channel === 'SMS' ? text.replace(/\p{Extended_Pictographic}️?\s?/gu, '') : text;
-        await this.messaging.send({ channel, to: p.phone, userId: p.userId, template: out.code, body: msg, vars: { ...Object.fromEntries(Object.entries(out.vars).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])), link: `${APP_URL()}${out.url}` } }).catch((err) => this.logger.warn(`${channel} to ${p.userId} failed: ${err.message}`));
-      }
-    }
-
     const devices = await this.prisma.deviceToken.findMany({ where: { userId: p.userId, app: out.app, isActive: true } });
     const message: PushMessage = { title, body, url: out.url, tag: out.tag, urgent: out.urgent, data: { notificationId: row.id, code: out.code } };
     const results = await Promise.all(devices.map((dv) => this.push.send(dv.token, dv.platform, message).then((r) => ({ id: dv.id, r }))));
@@ -341,6 +346,15 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     const sent = results.filter((x) => x.r === 'SENT' || x.r === 'LOGGED').length;
     if (devices.length) {
       await this.prisma.notification.update({ where: { id: row.id }, data: sent ? { status: 'SENT', sentAt: new Date() } : { status: 'FAILED' } });
+    }
+    if (out.offApp && p.phone && sendOffApp(out.offApp, p, results.some((x) => x.r === 'SENT'))) {
+      const link = `${out.app === 'LOCAL' ? LOCAL_URL() : APP_URL()}${out.url}`;
+      const text = `Delivez: ${title}. ${body} ${link}`;
+      for (const channel of out.offApp.channels) {
+        // Emoji turn an SMS into costlier Unicode and DLT templates reject them; WhatsApp keeps them.
+        const msg = channel === 'SMS' ? text.replace(/\p{Extended_Pictographic}️?\s?/gu, '') : text;
+        await this.messaging.send({ channel, to: p.phone, userId: p.userId, template: out.code, body: msg, vars: { ...Object.fromEntries(Object.entries(out.vars).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])), link } }).catch((err) => this.logger.warn(`${channel} to ${p.userId} failed: ${err.message}`));
+      }
     }
     return { notificationId: row.id, userId: p.userId, devices: devices.length, sent, removed: dead.length };
   }

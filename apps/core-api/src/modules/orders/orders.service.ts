@@ -7,10 +7,12 @@ import { KvService } from '../../common/kv/kv.service';
 import { EventBus } from '../../events/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../files/storage.service';
+import { CouponsService } from '../coupons/coupons.service';
 import { pharmacistsOnDuty } from '../pharmacy/duty';
 import { ACTIVE_STATES } from './order-state';
 import { CANCEL_TEXT, isCancelCode } from './sla';
 import { OrderStateService, travelMinutes, type OrderActor } from './order-state.service';
+import { itemsLeave } from './discount';
 
 export interface ItemInput {
   productId: string;
@@ -50,6 +52,8 @@ export interface CreateOrderInput {
   placedSecondsAgo?: number;
   /** Online payment through the gateway: the order waits as DRAFT (stock held, shop not told) until confirmPayment. */
   awaitPayment?: boolean;
+  /** Customer app: a coupon code (admin panel → Coupons). Checked again and claimed inside the order's transaction. */
+  couponCode?: string;
 }
 
 /** An unpaid DRAFT is released after this long (the gateway checkout itself times out sooner). */
@@ -92,6 +96,7 @@ export class OrdersService {
     private readonly events: EventBus,
     private readonly kv: KvService,
     private readonly storage: StorageService,
+    private readonly coupons: CouponsService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -145,10 +150,16 @@ export class OrdersService {
         }
       }
       const itemsSubtotal = priced.reduce((s, i) => s + i.lineTotal, 0);
-      const deliveryFee = input.fulfilmentType === 'DELIVERY' ? DELIVERY_FEE : 0;
+      const fullDelivery = input.fulfilmentType === 'DELIVERY' ? DELIVERY_FEE : 0;
       // App orders carry no packaging fee (customer policy); the shop's own counter / phone orders may.
       const packagingFee = store.vertical === 'EAT' && input.channel !== 'LOCAL_WEB' ? store.packagingFee : 0;
-      const grandTotal = itemsSubtotal + deliveryFee + packagingFee;
+      // Delivez pays for coupons: the items keep their full price for the shop; the customer pays less.
+      const coupon = input.couponCode
+        ? await this.coupons.claim(tx, input.couponCode, { customerId: customer.id, storeId: store.id, vertical: store.vertical, cityId: store.cityId, items: itemsSubtotal, delivery: fullDelivery })
+        : null;
+      const deliveryFee = fullDelivery - (coupon?.deliveryOff ?? 0);
+      const discountAmount = coupon?.itemsOff ?? 0;
+      const grandTotal = itemsSubtotal + deliveryFee + packagingFee - discountAmount;
       const paid = input.paymentMode !== 'COD';
       // Prescription orders are paid first too; the pharmacist sees them once the money is in (confirmPayment).
       const draft = !!input.awaitPayment && paid;
@@ -169,6 +180,8 @@ export class OrdersService {
           itemsSubtotal,
           deliveryFee,
           packagingFee,
+          discountAmount,
+          couponCode: coupon?.code,
           grandTotal,
           paymentMode: input.paymentMode,
           paymentStatus: draft ? 'PENDING' : paid ? 'CAPTURED' : 'COD_PENDING',
@@ -195,6 +208,8 @@ export class OrdersService {
           },
         },
       });
+
+      if (coupon) await tx.couponRedemption.create({ data: { couponId: coupon.couponId, customerId: customer.id, orderId: order.id, amount: coupon.saved } });
 
       // Hold stock so two orders can't sell the same last unit.
       for (const item of priced.filter((i) => i.inventoryTracked)) {
@@ -389,10 +404,11 @@ export class OrdersService {
       }
       await tx.orderItem.update({ where: { id: itemId }, data: { isOutOfStock: true } });
       await this.state.releaseItem(tx, orderId, item.productId, item.qty, actor);
-      await tx.order.update({ where: { id: orderId }, data: { itemsSubtotal: { decrement: item.lineTotal }, grandTotal: { decrement: item.lineTotal } } });
-      if (o.paymentStatus === 'CAPTURED') {
+      const gone = itemsLeave(o, item.lineTotal);
+      await tx.order.update({ where: { id: orderId }, data: gone.update });
+      if (o.paymentStatus === 'CAPTURED' && gone.refund > 0) {
         const payment = await tx.payment.findFirst({ where: { orderId, status: 'CAPTURED' } });
-        await tx.refund.create({ data: { orderId, paymentId: payment?.id, amount: item.lineTotal, reason: `${item.productName} unavailable`, initiatedBy: 'STORE' } });
+        await tx.refund.create({ data: { orderId, paymentId: payment?.id, amount: gone.refund, reason: `${item.productName} unavailable`, initiatedBy: 'STORE' } });
       }
       if (switchOff) {
         await tx.product.update({ where: { id: item.productId }, data: { isAvailable: false } });

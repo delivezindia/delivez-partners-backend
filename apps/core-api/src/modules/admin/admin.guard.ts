@@ -32,6 +32,8 @@ export const ROLES = {
   MANAGE_TEAM: ['FOUNDER', 'HEAD_OF_OPS'] as AdminRole[],
   MANAGE_GEO: ['FOUNDER', 'HEAD_OF_OPS', 'REGIONAL_HEAD'] as AdminRole[],
   MANAGE_LEGAL: ['FOUNDER', 'LEGAL'] as AdminRole[],
+  /** Customer coupons — Delivez pays for them. */
+  MANAGE_COUPONS: ['FOUNDER', 'HEAD_OF_OPS', 'FINANCE'] as AdminRole[],
   VIEW_AUDIT: ['FOUNDER', 'HEAD_OF_OPS', 'COMPLIANCE', 'LEGAL', 'AUDITOR'] as AdminRole[],
 };
 /** Roles only a FOUNDER may grant. */

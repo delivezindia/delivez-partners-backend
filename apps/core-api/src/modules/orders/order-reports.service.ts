@@ -44,7 +44,7 @@ export class OrderReportsService {
     const from = istDayStart(days - 1);
     const where: Prisma.OrderWhereInput = { storeId, placedAt: { gte: from }, status: { notIn: ['DRAFT', 'AWAITING_RX_REVIEW'] }, ...this.realOnly() };
     const [orders, missed, top] = await Promise.all([
-      this.prisma.order.findMany({ where, select: { status: true, grandTotal: true, placedAt: true, acceptedAt: true, readyAt: true } }),
+      this.prisma.order.findMany({ where, select: { status: true, grandTotal: true, discountAmount: true, placedAt: true, acceptedAt: true, readyAt: true } }),
       this.prisma.orderStatusEvent.count({ where: { toState: 'REJECTED', actorType: 'SYSTEM', order: where } }),
       this.prisma.orderItem.groupBy({
         by: ['productName'],
@@ -56,13 +56,14 @@ export class OrderReportsService {
     ]);
 
     const sold = orders.filter((o) => SOLD.includes(o.status));
-    const revenue = sold.reduce((n, o) => n + o.grandTotal, 0);
+    // Coupons are paid by Delivez, so the shop's sales are what the customer paid plus the coupon.
+    const revenue = sold.reduce((n, o) => n + o.grandTotal + o.discountAmount, 0);
     const prep = sold.filter((o) => o.acceptedAt && o.readyAt).map((o) => (o.readyAt!.getTime() - o.acceptedAt!.getTime()) / 60_000);
     const byDay = Array.from({ length: days }, (_, i) => {
       const day = istDate(istDayStart(days - 1 - i));
       const list = orders.filter((o) => o.placedAt && istDate(o.placedAt) === day);
       const s = list.filter((o) => SOLD.includes(o.status));
-      return { date: day, orders: list.length, sold: s.length, revenue: s.reduce((n, o) => n + o.grandTotal, 0) };
+      return { date: day, orders: list.length, sold: s.length, revenue: s.reduce((n, o) => n + o.grandTotal + o.discountAmount, 0) };
     });
 
     return {

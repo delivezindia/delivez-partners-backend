@@ -28,6 +28,7 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { SystemModule } from './modules/system/system.module';
+import { CouponsModule } from './modules/coupons/coupons.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { SystemModule } from './modules/system/system.module';
     CatalogModule,
     NotificationsModule,
     SystemModule,
+    CouponsModule,
     RealtimeModule,
   ],
   providers: [{ provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor }],

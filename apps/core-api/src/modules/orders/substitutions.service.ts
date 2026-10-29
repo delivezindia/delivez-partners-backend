@@ -3,6 +3,7 @@ import { ApiError } from '../../common/api-exception.filter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderStateService, type OrderActor } from './order-state.service';
 import { OrdersService } from './orders.service';
+import { itemsLeave } from './discount';
 
 /** How long the customer has to answer before the substitute counts as declined. */
 export const SUBSTITUTE_ANSWER_MINUTES = 5;
@@ -100,10 +101,12 @@ export class SubstitutionsService {
         await this.state.releaseItem(tx, orderId, item.productId, item.qty, actor);
         await tx.orderItem.create({ data: { orderId, productId: sub.productId, productName: sub.productName, variantName: sub.variantName, unitPrice: sub.unitPrice, qty: sub.qty, taxRatePct: sub.taxRatePct, lineTotal: sub.lineTotal } });
         const delta = sub.lineTotal - item.lineTotal;
-        await tx.order.update({ where: { id: orderId }, data: { itemsSubtotal: { increment: delta }, grandTotal: { increment: delta } } });
-        if (delta < 0 && o.paymentStatus === 'CAPTURED') {
+        // Cheaper replacement: the difference comes back (less the coupon's share of it, if there was one).
+        const cheaper = delta < 0 ? itemsLeave(o, -delta) : null;
+        await tx.order.update({ where: { id: orderId }, data: cheaper ? cheaper.update : { itemsSubtotal: { increment: delta }, grandTotal: { increment: delta } } });
+        if (cheaper && cheaper.refund > 0 && o.paymentStatus === 'CAPTURED') {
           const payment = await tx.payment.findFirst({ where: { orderId, status: 'CAPTURED' } });
-          await tx.refund.create({ data: { orderId, paymentId: payment?.id, amount: -delta, reason: `${item.productName} replaced by ${sub.productName}`, initiatedBy: 'STORE' } });
+          await tx.refund.create({ data: { orderId, paymentId: payment?.id, amount: cheaper.refund, reason: `${item.productName} replaced by ${sub.productName}`, initiatedBy: 'STORE' } });
         }
         await this.state.note(tx, o, 'order.substitution_accepted', actor, `${item.productName} → ${sub.productName}`, { substitutionId: sub.id, itemId: item.id, priceChange: delta });
         return;
@@ -112,19 +115,21 @@ export class SubstitutionsService {
       // Declined / no answer / order moved on: give back the replacement's stock.
       await this.state.releaseItem(tx, orderId, sub.productId, sub.qty, actor);
       if (!stillOpen) return;
+      let refund: ReturnType<typeof itemsLeave> | null = null;
       const live = await tx.orderItem.count({ where: { orderId, isOutOfStock: false } });
       if (live <= 1) {
         cancelOrder = true; // nothing left to send — cancel and refund the whole order below
       } else {
         await tx.orderItem.update({ where: { id: item.id }, data: { isOutOfStock: true } });
         await this.state.releaseItem(tx, orderId, item.productId, item.qty, actor);
-        await tx.order.update({ where: { id: orderId }, data: { itemsSubtotal: { decrement: item.lineTotal }, grandTotal: { decrement: item.lineTotal } } });
-        if (o.paymentStatus === 'CAPTURED') {
+        refund = itemsLeave(o, item.lineTotal);
+        await tx.order.update({ where: { id: orderId }, data: refund.update });
+        if (o.paymentStatus === 'CAPTURED' && refund.refund > 0) {
           const payment = await tx.payment.findFirst({ where: { orderId, status: 'CAPTURED' } });
-          await tx.refund.create({ data: { orderId, paymentId: payment?.id, amount: item.lineTotal, reason: `${item.productName} unavailable`, initiatedBy: 'STORE' } });
+          await tx.refund.create({ data: { orderId, paymentId: payment?.id, amount: refund.refund, reason: `${item.productName} unavailable`, initiatedBy: 'STORE' } });
         }
       }
-      await this.state.note(tx, o, 'order.substitution_declined', actor, expired ? `No answer — ${item.productName} removed` : `Customer declined ${sub.productName}`, { substitutionId: sub.id, itemId: item.id, expired, refund: o.paymentStatus === 'CAPTURED' ? item.lineTotal : 0 });
+      await this.state.note(tx, o, 'order.substitution_declined', actor, expired ? `No answer — ${item.productName} removed` : `Customer declined ${sub.productName}`, { substitutionId: sub.id, itemId: item.id, expired, refund: o.paymentStatus === 'CAPTURED' ? (refund?.refund ?? 0) : 0 });
     });
     if (cancelOrder) {
       await this.state.transition(orderId, 'CANCEL', { kind: 'SYSTEM' }, { reason: 'The only item ran out and the substitute was not accepted', code: 'STORE_ITEMS_UNAVAILABLE', meta: { auto: 'SUBSTITUTE_DECLINED' } });

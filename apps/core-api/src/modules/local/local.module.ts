@@ -5,6 +5,7 @@ import type { AuthUser } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { Apps, CurrentUser, Public } from '../identity/auth.decorators';
 import { LocalAccountService } from './local-account.service';
+import { LocalOverviewService } from './local-overview.service';
 import { LocalStoresService } from './local-stores.service';
 import { LocalOrdersService, ONLINE_METHODS } from './local-orders.service';
 import { OrdersModule } from '../orders/orders.module';
@@ -12,8 +13,10 @@ import { PaymentsModule } from '../payments/payments.module';
 import { RequireIdempotency } from '../../common/idempotency.interceptor';
 import { LabBookingsModule } from '../lab-bookings/lab-bookings.module';
 import { SupportModule } from '../support/support.module';
+import { CouponsModule } from '../coupons/coupons.module';
 import { CUSTOMER_CATEGORIES, SupportService } from '../support/support.service';
 import { RETURN_REASONS } from '../orders/returns-rules';
+import { LocalLabPaymentsService } from './local-lab-payments.service';
 import { LocalLabsService } from './local-labs.service';
 import { REVIEW_TAGS } from './local-orders.service';
 
@@ -66,6 +69,7 @@ const quoteSchema = z.object({
   addressId: z.string().uuid().optional(),
   items: z.array(itemSchema).min(1, 'Your cart is empty').max(50),
   prescriptionFileKeys: z.array(z.string().max(200)).max(5).optional(),
+  couponCode: z.string().trim().max(20).regex(/^[A-Za-z0-9]*$/, 'Letters and numbers only').optional().transform((v) => v || undefined),
 });
 const checkoutSchema = quoteSchema.extend({
   // Online only — no cash on delivery for app orders.
@@ -94,6 +98,7 @@ const labBookSchema = z
     addressId: z.string().uuid().optional(),
     note: z.string().trim().max(300).optional(),
     prescriptionFileKeys: z.array(z.string().max(200)).max(5).optional(),
+    paymentMode: z.enum(['COD', 'UPI', 'CARD', 'NETBANKING']).optional(),
   })
   .refine((v) => v.collectionType !== 'HOME' || !!v.addressId, { message: 'Choose the address for sample collection', path: ['addressId'] });
 const rescheduleSchema = z.object({ slotStart: z.coerce.date() });
@@ -104,6 +109,24 @@ const ticketSchema = z.object({
   orderId: z.string().uuid().optional(),
 });
 const replySchema = z.object({ body: z.string().trim().min(1).max(2000) });
+
+/** The public page: live cities, shops per kind, and "do you deliver to my PIN?" — no login needed. */
+@ApiTags('local')
+@Public()
+@Controller('local')
+export class LocalOverviewController {
+  constructor(private readonly overview: LocalOverviewService) {}
+
+  @Get('overview')
+  get() {
+    return this.overview.overview();
+  }
+
+  @Get('serviceable/:pincode')
+  serviceable(@Param('pincode', new ZodValidationPipe(z.string().regex(/^[1-9]\d{5}$/, 'Enter a valid 6-digit PIN code'))) pincode: string) {
+    return this.overview.serviceable(pincode);
+  }
+}
 
 /** Browsing — no login needed. */
 @ApiTags('local')
@@ -277,6 +300,18 @@ export class LocalLabsController {
     return this.labs.book(u.userId, b);
   }
 
+  @Post('lab-bookings/payments/:paymentId/verify')
+  @HttpCode(200)
+  verifyLabPayment(@CurrentUser() u: AuthUser, @Param('paymentId', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(verifySchema)) b: z.infer<typeof verifySchema>) {
+    return this.labs.verifyPayment(u.userId, id, b);
+  }
+
+  @Post('lab-bookings/payments/:paymentId/abandon')
+  @HttpCode(200)
+  abandonLabPayment(@CurrentUser() u: AuthUser, @Param('paymentId', ParseUUIDPipe) id: string) {
+    return this.labs.abandonPayment(u.userId, id);
+  }
+
   @Get('lab-bookings')
   list(@CurrentUser() u: AuthUser) {
     return this.labs.list(u.userId);
@@ -343,9 +378,9 @@ export class LocalSupportController {
 }
 
 @Module({
-  imports: [OrdersModule, PaymentsModule, LabBookingsModule, SupportModule],
-  controllers: [LocalStoresController, LocalAccountController, LocalOrdersController, LocalLabsController, LocalSupportController],
-  providers: [LocalStoresService, LocalAccountService, LocalOrdersService, LocalLabsService],
+  imports: [OrdersModule, PaymentsModule, LabBookingsModule, SupportModule, CouponsModule],
+  controllers: [LocalOverviewController, LocalStoresController, LocalAccountController, LocalOrdersController, LocalLabsController, LocalSupportController],
+  providers: [LocalOverviewService, LocalStoresService, LocalAccountService, LocalOrdersService, LocalLabsService, LocalLabPaymentsService],
   exports: [LocalAccountService],
 })
 export class LocalModule {}

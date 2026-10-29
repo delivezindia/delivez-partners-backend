@@ -138,6 +138,17 @@ export class LabBookingsService {
   // ------------------------------------------------------------------
 
   async create(input: CreateBookingInput, actor: LabActorCtx) {
+    const { id } = await this.prepare(input, actor, false);
+    return this.detailById(id!);
+  }
+
+  /** Every check a booking goes through, without booking: the price, or the reason it can't be booked (used before taking payment). */
+  async check(input: CreateBookingInput) {
+    const { grandTotal } = await this.prepare(input, { kind: 'CUSTOMER' }, true);
+    return { grandTotal };
+  }
+
+  private async prepare(input: CreateBookingInput, actor: LabActorCtx, dryRun: boolean): Promise<{ id?: string; grandTotal: number }> {
     const store = await this.prisma.store.findUnique({ where: { id: input.storeId } });
     if (!store || store.vertical !== 'DIAGNOSTICS') throw new ApiError(HttpStatus.NOT_FOUND, 'STORE_NOT_FOUND', 'Lab not found');
     if (!['LIVE', 'LIMITED'].includes(store.status)) throw new ApiError(HttpStatus.CONFLICT, 'STORE_NOT_LIVE', 'Bookings start once the lab is live');
@@ -170,6 +181,8 @@ export class LabBookingsService {
     const grandTotal = itemsSubtotal + collectionFee;
     const paid = input.paymentMode !== 'COD';
     const status: LabBookingStatus = storeCreated ? 'CONFIRMED' : rxRequired ? 'RX_REVIEW' : 'BOOKED';
+
+    if (dryRun) return { grandTotal };
 
     const booking = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.upsert({ where: { phone: input.customer.phone }, update: {}, create: { phone: input.customer.phone, fullName: input.customer.name ?? null } });
@@ -222,7 +235,7 @@ export class LabBookingsService {
       });
       return b;
     });
-    return this.detailById(booking.id);
+    return { id: booking.id, grandTotal };
   }
 
   private async newNumber(tx: Prisma.TransactionClient) {

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { z } from 'zod';
 import type { ApiRequest, AuthUser } from '../../common/request-context';
@@ -15,9 +15,12 @@ import {
   memberUpdateSchema,
   pinSchema,
   pinSwitchSchema,
+  reviewReplySchema,
+  reviewsQuery,
   settingsSchema,
   timingsSchema,
 } from './settings.schemas';
+import { ReviewsService } from './reviews.service';
 import { StaffService } from './staff.service';
 
 const actorOf = (user: AuthUser, req: ApiRequest): Actor => ({ userId: user.userId, ip: req.ip, userAgent: req.header('user-agent'), correlationId: req.correlationId, channel: 'WEB' });
@@ -33,6 +36,7 @@ export class StoresController {
     private readonly settings: SettingsService,
     private readonly staff: StaffService,
     private readonly onboarding: OnboardingService,
+    private readonly reviews: ReviewsService,
   ) {}
 
   // Settings -----------------------------------------------------------
@@ -139,5 +143,20 @@ export class StoresController {
       correlationId: r.correlationId,
       device: { platform: 'WEB' },
     });
+  }
+
+  // Ratings ---------------------------------------------------------------
+
+  @Get('reviews')
+  @PartnerRoles('OWNER', 'MANAGER', 'KITCHEN_LEAD', 'COUNTER_STAFF', 'PHARMACIST')
+  listReviews(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(reviewsQuery)) q: z.infer<typeof reviewsQuery>) {
+    return this.reviews.list(storeId, q);
+  }
+
+  @Post('reviews/:reviewId/reply')
+  @HttpCode(200)
+  @PartnerRoles('OWNER', 'MANAGER')
+  replyReview(@Param('storeId', ParseUUIDPipe) storeId: string, @Param('reviewId', ParseUUIDPipe) reviewId: string, @Body(new ZodValidationPipe(reviewReplySchema)) body: z.infer<typeof reviewReplySchema>, @CurrentUser() u: AuthUser) {
+    return this.reviews.reply(storeId, reviewId, body.reply, u.userId);
   }
 }

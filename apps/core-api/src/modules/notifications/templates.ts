@@ -190,6 +190,22 @@ export const TEMPLATES: Record<string, Partial<Record<Lang, Copy>> & { EN: Copy 
     HI: (v) => ({ title: 'आपकी लैब रिपोर्ट तैयार है', body: `${v.bookingNumber} · देखने के लिए ऐप खोलें।` }),
     KN: (v) => ({ title: 'ನಿಮ್ಮ ಲ್ಯಾಬ್ ವರದಿ ಸಿದ್ಧ', body: `${v.bookingNumber} · ನೋಡಲು ಆ್ಯಪ್ ತೆರೆಯಿರಿ.` }),
   },
+  CUST_LAB_SAMPLE: {
+    EN: (v) => ({ title: 'Sample collected', body: `${v.bookingNumber} is on its way to ${v.store}. We’ll tell you when the report is ready.` }),
+    HI: (v) => ({ title: 'सैंपल ले लिया गया', body: `${v.bookingNumber} ${v.store} भेजा जा रहा है। रिपोर्ट तैयार होते ही बताएँगे।` }),
+    KN: (v) => ({ title: 'ಮಾದರಿ ಸಂಗ್ರಹಿಸಲಾಗಿದೆ', body: `${v.bookingNumber} ${v.store} ಗೆ ಹೋಗುತ್ತಿದೆ. ವರದಿ ಸಿದ್ಧವಾದಾಗ ತಿಳಿಸುತ್ತೇವೆ.` }),
+  },
+  CUST_REVIEW_REPLY: {
+    EN: (v) => ({ title: `${v.store} replied to your rating`, body: `About ${v.orderNumber} · open the order to read it.` }),
+    HI: (v) => ({ title: `${v.store} ने आपकी रेटिंग का जवाब दिया`, body: `${v.orderNumber} · पढ़ने के लिए ऑर्डर खोलें।` }),
+    KN: (v) => ({ title: `${v.store} ನಿಮ್ಮ ರೇಟಿಂಗ್‌ಗೆ ಉತ್ತರಿಸಿದೆ`, body: `${v.orderNumber} · ಓದಲು ಆರ್ಡರ್ ತೆರೆಯಿರಿ.` }),
+  },
+  // ---- Partners: ratings
+  NEW_REVIEW: {
+    EN: (v) => ({ title: `${'★'.repeat(Number(v.rating))} rating on ${v.orderNumber}`, body: Number(v.rating) <= 2 ? 'A customer was unhappy — read it and reply.' : v.comment ? 'The customer left a comment.' : 'Thanks to your team!' }),
+    HI: (v) => ({ title: `${v.orderNumber} पर ${v.rating}★ रेटिंग`, body: Number(v.rating) <= 2 ? 'ग्राहक नाखुश है — पढ़ें और जवाब दें।' : v.comment ? 'ग्राहक ने टिप्पणी लिखी है।' : 'आपकी टीम को धन्यवाद!' }),
+    KN: (v) => ({ title: `${v.orderNumber} ಗೆ ${v.rating}★ ರೇಟಿಂಗ್`, body: Number(v.rating) <= 2 ? 'ಗ್ರಾಹಕರು ಅಸಮಾಧಾನಗೊಂಡಿದ್ದಾರೆ — ಓದಿ ಉತ್ತರಿಸಿ.' : v.comment ? 'ಗ್ರಾಹಕರು ಕಾಮೆಂಟ್ ಬರೆದಿದ್ದಾರೆ.' : 'ನಿಮ್ಮ ತಂಡಕ್ಕೆ ಧನ್ಯವಾದ!' }),
+  },
   // ---- Partners: account
   DOC_VERIFIED: {
     EN: (v) => ({ title: 'Document approved', body: `${v.label} for ${v.store} was verified.` }),

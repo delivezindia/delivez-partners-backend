@@ -2,6 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Prisma } from '@delivez/db';
 import { ApiError } from '../../common/api-exception.filter';
 import { haversineKm } from '../../common/geo';
+import { EventBus } from '../../events/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderStateService } from '../orders/order-state.service';
 import { DELIVERY_FEE, OrdersService, type ItemInput } from '../orders/orders.service';
@@ -12,6 +13,8 @@ import { pharmacistsOnDuty } from '../pharmacy/duty';
 import { SubstitutionsService } from '../orders/substitutions.service';
 import { ReturnsService } from '../orders/returns.service';
 import { returnsAllowed, windowState, type ReturnRequest } from '../orders/returns-rules';
+import { CouponsService } from '../coupons/coupons.service';
+import { couponHeadline, PROBLEM_TEXT } from '../coupons/coupon-rules';
 
 /** Quick tags a customer can add to a rating. */
 export const REVIEW_TAGS = ['ON_TIME', 'LATE', 'GOOD_PACKING', 'POOR_PACKING', 'FRESH', 'WRONG_ITEM', 'FRIENDLY', 'COLD_FOOD'] as const;
@@ -28,6 +31,8 @@ export interface CheckoutInput {
   note?: string;
   /** Uploaded prescription (keys from rxUpload) for medicines that need one. */
   prescriptionFileKeys?: string[];
+  /** Coupon code (admin panel → Coupons). */
+  couponCode?: string;
 }
 
 /** A basket line the customer has to fix before ordering. */
@@ -62,6 +67,7 @@ const ORDER_INCLUDE = {
   substitutions: { orderBy: { createdAt: 'asc' } },
   returns: { orderBy: { createdAt: 'asc' } },
   review: { select: { rating: true, comment: true, tags: true, reply: true, createdAt: true } },
+  couponRedemption: { select: { amount: true } },
 } satisfies Prisma.OrderInclude;
 type Row = Prisma.OrderGetPayload<{ include: typeof ORDER_INCLUDE }>;
 
@@ -82,6 +88,8 @@ export class LocalOrdersService {
     private readonly storage: StorageService,
     private readonly substitutions: SubstitutionsService,
     private readonly returns: ReturnsService,
+    private readonly events: EventBus,
+    private readonly coupons: CouponsService,
   ) {}
 
   /** Where to upload the prescription for a pharmacy order (private; only that pharmacy and ops can open it). */
@@ -121,7 +129,8 @@ export class LocalOrdersService {
     if (!['DELIVERED', 'COMPLETED'].includes(o.status)) throw new ApiError(HttpStatus.CONFLICT, 'NOT_DELIVERED', 'You can rate an order once it’s delivered');
     if (o.review) throw new ApiError(HttpStatus.CONFLICT, 'ALREADY_RATED', 'You’ve already rated this order');
     await this.prisma.$transaction(async (tx) => {
-      await tx.review.create({ data: { orderId: o.id, customerId: customer.id, storeId: o.storeId, rating: input.rating, comment: input.comment || null, tags: input.tags ?? [] } });
+      const r = await tx.review.create({ data: { orderId: o.id, customerId: customer.id, storeId: o.storeId, rating: input.rating, comment: input.comment || null, tags: input.tags ?? [] } });
+      await this.events.publish(tx, { type: 'review.created', data: { storeId: o.storeId, orderId: o.id, orderNumber: o.orderNumber, reviewId: r.id, rating: input.rating, hasComment: !!input.comment }, actor: { type: 'CUSTOMER', userId } });
       // Running average, locked so two ratings at once don't overwrite each other.
       await tx.$executeRaw`UPDATE stores SET "avgRating" = ("avgRating" * "ratingCount" + ${input.rating}) / ("ratingCount" + 1), "ratingCount" = "ratingCount" + 1 WHERE id = ${o.storeId}`;
     });
@@ -207,8 +216,20 @@ export class LocalOrdersService {
         outOfRange = distanceKm > radius;
       }
     }
-    const delivery = DELIVERY_FEE;
     const packaging = 0;
+    // Coupon: applied when it fits; otherwise the bill is shown without it and the reason beside the code box.
+    const customer = await this.account.customer(userId);
+    const couponCtx = { customerId: customer.id, storeId: store.id, vertical: store.vertical, cityId: store.cityId, items, delivery: DELIVERY_FEE };
+    let coupon: { code: string; headline: string; description: string | null; saved: number; itemsOff: number; deliveryOff: number } | null = null;
+    let couponError: { problem: string; message: string; short?: number } | null = null;
+    if (input.couponCode) {
+      const p = await this.coupons.preview(input.couponCode, couponCtx);
+      if (p.coupon && p.check.ok) coupon = { code: p.coupon.code, headline: couponHeadline(p.coupon), description: p.coupon.description, saved: p.check.saved, itemsOff: p.check.itemsOff, deliveryOff: p.check.deliveryOff };
+      else if (!p.check.ok) couponError = p.check.problem === 'NOT_FOUND' ? { problem: 'NOT_FOUND', message: 'This code doesn’t exist — check the spelling' } : { problem: p.check.problem, message: PROBLEM_TEXT[p.check.problem], short: p.check.short };
+    }
+    const offers = store.vertical === 'DIAGNOSTICS' ? [] : await this.coupons.forBasket(couponCtx);
+    const delivery = DELIVERY_FEE - (coupon?.deliveryOff ?? 0);
+    const discount = coupon?.itemsOff ?? 0;
     // Prescription medicines: need the doctor's prescription uploaded, and a pharmacist on duty to check it.
     const rxNames = store.vertical === 'PHARMACY' ? priced.filter((l) => l.isRx).map((l) => l.name) : [];
     const noPharmacist = rxNames.length > 0 && !(await pharmacistsOnDuty(this.prisma, store.id)).length;
@@ -242,9 +263,12 @@ export class LocalOrdersService {
         items,
         delivery,
         packaging,
-        discount: 0,
-        grandTotal: items + delivery + packaging,
+        discount,
+        grandTotal: items + delivery + packaging - discount,
       },
+      coupon,
+      couponError,
+      offers,
       blockers,
       canPlace: blockers.length === 0,
     };
@@ -294,6 +318,7 @@ export class LocalOrdersService {
         note: input.note,
         prescriptionFileKeys: q.rxItems.length ? input.prescriptionFileKeys : undefined,
         awaitPayment: gateway,
+        couponCode: input.couponCode,
       },
       { kind: 'CUSTOMER', userId },
     );
@@ -410,6 +435,7 @@ export class LocalOrdersService {
         discount: o.discountAmount,
         grandTotal: o.grandTotal,
       },
+      coupon: o.couponCode ? { code: o.couponCode, saved: o.couponRedemption?.amount ?? o.discountAmount, freeDelivery: o.deliveryFee === 0 && o.fulfilmentType === 'DELIVERY' } : null,
       payment: { mode: o.paymentMode, status: o.paymentStatus },
       // The rider asks for this at the door.
       codes: active && o.status !== 'DRAFT' && o.fulfilmentType === 'DELIVERY' ? { delivery: o.deliveryOtp } : null,

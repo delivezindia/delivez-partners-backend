@@ -74,3 +74,11 @@ export const memberUpdateSchema = z
 
 export const pinSchema = z.object({ pin: z.string().regex(/^\d{4}$/, 'PIN must be 4 digits') });
 export const pinSwitchSchema = z.object({ memberId: z.string().uuid(), pin: z.string().regex(/^\d{4}$/) });
+
+export const reviewsQuery = z.object({
+  filter: z.enum(['ALL', 'UNREPLIED', 'LOW']).default('ALL'),
+  before: z.string().datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export const reviewReplySchema = z.object({ reply: z.string().trim().min(2).max(500) });

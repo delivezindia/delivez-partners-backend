@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OrderStateService, type OrderActor } from './order-state.service';
 import { OrdersService } from './orders.service';
 import { checkReturn, windowState, type ReturnRequest } from './returns-rules';
+import { itemsLeave } from './discount';
 
 /**
  * Doorstep returns (see returns-rules.ts). The rider (or ops, playing the rider until the rider app exists)
@@ -33,7 +34,14 @@ export class ReturnsService {
       const cash = o.paymentMode === 'COD';
       const payment = cash ? null : await tx.payment.findFirst({ where: { orderId, status: 'CAPTURED' } });
       const now = new Date();
+      // With a coupon, each line comes back at what the customer paid for it (the coupon's share stays behind).
+      const bill = { itemsSubtotal: o.itemsSubtotal, discountAmount: o.discountAmount };
+      let refunded = 0;
       for (const line of check.lines) {
+        const back = itemsLeave(bill, line.amount);
+        bill.itemsSubtotal -= line.amount;
+        bill.discountAmount -= back.share;
+        refunded += back.refund;
         const item = o.items.find((i) => i.id === line.itemId)!;
         await tx.orderItem.update({ where: { id: item.id }, data: { returnedQty: { increment: line.qty } } });
         await tx.orderReturn.create({
@@ -43,7 +51,7 @@ export class ReturnsService {
             productId: item.productId,
             productName: item.productName,
             qty: line.qty,
-            amount: line.amount,
+            amount: back.refund, // what goes back to the customer (less any coupon share)
             reason: line.reason,
             note,
             status: line.reason === 'MISSING' ? 'NOT_APPLICABLE' : 'WITH_RIDER',
@@ -53,16 +61,16 @@ export class ReturnsService {
           },
         });
         await tx.refund.create({
-          data: { orderId, paymentId: payment?.id, amount: line.amount, reason: `${item.productName} returned at the door (${line.reason.toLowerCase().replace('_', ' ')})`, initiatedBy: actor.kind === 'RIDER' || actor.kind === 'CUSTOMER' ? actor.kind : 'ADMIN', ...(cash ? { status: 'PROCESSED', processedAt: now } : {}) },
+          data: { orderId, paymentId: payment?.id, amount: back.refund, reason: `${item.productName} returned at the door (${line.reason.toLowerCase().replace('_', ' ')})`, initiatedBy: actor.kind === 'RIDER' || actor.kind === 'CUSTOMER' ? actor.kind : 'ADMIN', ...(cash ? { status: 'PROCESSED', processedAt: now } : {}) },
         });
       }
       // The bill (and so sales reports and GST) shrink by what came back.
       await tx.order.update({
         where: { id: orderId },
-        data: { itemsSubtotal: { decrement: check.total }, grandTotal: { decrement: check.total }, returnWindowClosedAt: now, returnWindowOutcome: 'RETURNED' },
+        data: { itemsSubtotal: { decrement: check.total }, discountAmount: o.discountAmount - bill.discountAmount ? { decrement: o.discountAmount - bill.discountAmount } : undefined, grandTotal: { decrement: refunded }, returnWindowClosedAt: now, returnWindowOutcome: 'RETURNED' },
       });
       const withRider = check.lines.filter((l) => l.reason !== 'MISSING').reduce((n, l) => n + l.qty, 0);
-      await this.state.note(tx, o, 'order.return_created', actor, `${check.lines.length} item(s) returned at the door`, { amount: check.total, withRider, refundMethod: cash ? 'CASH_AT_DOOR' : 'ONLINE', items: check.lines.map((l) => ({ itemId: l.itemId, qty: l.qty, reason: l.reason })) });
+      await this.state.note(tx, o, 'order.return_created', actor, `${check.lines.length} item(s) returned at the door`, { amount: refunded, withRider, refundMethod: cash ? 'CASH_AT_DOOR' : 'ONLINE', items: check.lines.map((l) => ({ itemId: l.itemId, qty: l.qty, reason: l.reason })) });
     });
     return this.orders.detailById(orderId);
   }

@@ -33,6 +33,9 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PaymentsService.name);
   private timer?: NodeJS.Timeout;
   private running = false;
+  /** Payments that aren't for an order (lab bookings) — handlers registered by their owners. */
+  private otherPayment: ((p: RzpPayment) => Promise<boolean>)[] = [];
+  private otherRefund: ((providerRefundId: string, status: 'PROCESSED' | 'FAILED') => Promise<boolean>)[] = [];
 
   constructor(
     private readonly prisma: PrismaService,
@@ -42,6 +45,13 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
 
   get enabled() {
     return this.rzp.enabled;
+  }
+
+  onOtherPayment(fn: (p: RzpPayment) => Promise<boolean>) {
+    this.otherPayment.push(fn);
+  }
+  onOtherRefund(fn: (providerRefundId: string, status: 'PROCESSED' | 'FAILED') => Promise<boolean>) {
+    this.otherRefund.push(fn);
   }
 
   onModuleInit() {
@@ -134,6 +144,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     if ((evt.event === 'payment.captured' || evt.event === 'payment.authorized' || evt.event === 'order.paid') && p) {
       const pay = await this.prisma.payment.findFirst({ where: { provider: 'RAZORPAY', providerOrderId: p.order_id } });
       if (pay) await this.settle(pay.orderId, p);
+      else for (const fn of this.otherPayment) if (await fn(p)) break;
     }
     const r = evt.payload.refund?.entity;
     if ((evt.event === 'refund.processed' || evt.event === 'refund.failed') && r) await this.markRefund(r.id, r.status === 'processed' ? 'PROCESSED' : 'FAILED');
@@ -194,7 +205,11 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
 
   private async markRefund(providerRefundId: string, status: 'PROCESSED' | 'FAILED') {
     const r = await this.prisma.refund.findFirst({ where: { providerRefundId } });
-    if (!r || r.status !== 'INITIATED') return;
+    if (!r) {
+      for (const fn of this.otherRefund) if (await fn(providerRefundId, status)) break;
+      return;
+    }
+    if (r.status !== 'INITIATED') return;
     await this.prisma.refund.update({ where: { id: r.id }, data: { status, processedAt: new Date() } });
     if (status !== 'PROCESSED') return;
     const open = await this.prisma.refund.count({ where: { orderId: r.orderId, status: 'INITIATED' } });

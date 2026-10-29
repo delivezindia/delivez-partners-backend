@@ -12,6 +12,7 @@ import { corsOrigin } from '../common/public-url';
 import { EventBus, type DomainEvent } from '../events/event-bus.service';
 import { TokenService, type AccessClaims } from '../modules/identity/token.service';
 import { PartnerAccessService } from '../modules/partners/partner-access.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 type ClientData = { claims: AccessClaims };
 
@@ -27,6 +28,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
     private readonly tokens: TokenService,
     private readonly events: EventBus,
     private readonly partnerAccess: PartnerAccessService,
+    private readonly prisma: PrismaService,
   ) {}
 
   onModuleInit() {
@@ -62,6 +64,15 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
         return { ok: true, room };
       }
     }
+    // Customers may follow their own orders and lab bookings.
+    if ((kind === 'order' || kind === 'booking') && id && claims.app === 'LOCAL') {
+      const where = { id, customer: { userId: claims.sub } };
+      const own = kind === 'order' ? await this.prisma.order.findFirst({ where, select: { id: true } }) : await this.prisma.labBooking.findFirst({ where, select: { id: true } });
+      if (own) {
+        await client.join(room);
+        return { ok: true, room };
+      }
+    }
     return { ok: false, room, error: 'ROOM_ACCESS_DENIED' };
   }
 
@@ -72,12 +83,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
   }
 
   private route(event: DomainEvent) {
-    const data = event.data as { storeId?: string; orderId?: string; userId?: string };
-    const rooms = [
-      data.storeId && `store:${data.storeId}`,
-      data.orderId && `order:${data.orderId}`,
-      data.userId && `user:${data.userId}`,
-    ].filter(Boolean) as string[];
+    const data = event.data as { storeId?: string; orderId?: string; bookingId?: string; userId?: string };
+    const rooms = [data.storeId && `store:${data.storeId}`, data.userId && `user:${data.userId}`].filter(Boolean) as string[];
     if (rooms.length) this.server.to(rooms).emit(event.type, event);
+    // Customer rooms get only a "something changed" signal; the app refetches its own view.
+    const ping = { id: event.id, type: event.type, occurredAt: event.occurredAt, data: { orderId: data.orderId, bookingId: data.bookingId } };
+    if (data.orderId) this.server.to(`order:${data.orderId}`).emit(event.type, ping);
+    if (data.bookingId) this.server.to(`booking:${data.bookingId}`).emit(event.type, ping);
   }
 }

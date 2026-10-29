@@ -2,9 +2,10 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import type { LabCollectionType, Prisma } from '@delivez/db';
 import { ApiError } from '../../common/api-exception.filter';
 import { PrismaService } from '../../prisma/prisma.service';
-import { LabBookingsService } from '../lab-bookings/lab-bookings.service';
+import { LabBookingsService, type CreateBookingInput } from '../lab-bookings/lab-bookings.service';
 import { PRE_COLLECTION } from '../lab-bookings/lab-booking-state';
 import { LocalAccountService } from './local-account.service';
+import { LocalLabPaymentsService } from './local-lab-payments.service';
 
 export interface LabBookInput {
   storeId: string;
@@ -15,6 +16,8 @@ export interface LabBookInput {
   addressId?: string;
   note?: string;
   prescriptionFileKeys?: string[];
+  /** COD = pay at collection; UPI / CARD / NETBANKING = pay online now (Razorpay), booked once paid. */
+  paymentMode?: 'COD' | 'UPI' | 'CARD' | 'NETBANKING';
 }
 
 const INCLUDE = {
@@ -27,7 +30,7 @@ type Row = Prisma.LabBookingGetPayload<{ include: typeof INCLUDE }>;
 
 /**
  * Lab tests in the customer app: pick tests → home collection or walk-in → an hourly slot → book.
- * Paid at collection (cash / UPI to the collector or the desk) — the lab confirms, collects with the booking code,
+ * Paid online up front (Razorpay) or at collection (cash / UPI to the collector or the desk) — the lab confirms, collects with the booking code,
  * and releases the pathologist-signed report here.
  */
 @Injectable()
@@ -36,6 +39,7 @@ export class LocalLabsService {
     private readonly prisma: PrismaService,
     private readonly labs: LabBookingsService,
     private readonly account: LocalAccountService,
+    private readonly payments: LocalLabPaymentsService,
   ) {}
 
   async slots(storeId: string, date: string, type: LabCollectionType) {
@@ -59,23 +63,34 @@ export class LocalLabsService {
       if (!a) throw new ApiError(HttpStatus.NOT_FOUND, 'ADDRESS_NOT_FOUND', 'Choose the address for sample collection');
       address = { line1: [a.line1, a.line2].filter(Boolean).join(', '), landmark: a.landmark ?? undefined, pincode: a.pincode, lat: a.lat, lng: a.lng };
     }
-    const b = await this.labs.create(
-      {
-        storeId: input.storeId,
-        channel: 'LOCAL_WEB',
-        collectionType: input.collectionType,
-        slotStart: input.slotStart,
-        customer: { phone: user.phone, name: user.fullName ?? undefined },
-        patient: input.patient,
-        testIds: [...new Set(input.testIds)],
-        paymentMode: 'COD',
-        address,
-        note: input.note,
-        prescriptionFileKeys: input.prescriptionFileKeys,
-      },
-      { kind: 'CUSTOMER', userId },
-    );
+    const mode = input.paymentMode ?? 'COD';
+    const create: CreateBookingInput = {
+      storeId: input.storeId,
+      channel: 'LOCAL_WEB',
+      collectionType: input.collectionType,
+      slotStart: input.slotStart,
+      customer: { phone: user.phone, name: user.fullName ?? undefined },
+      patient: input.patient,
+      testIds: [...new Set(input.testIds)],
+      paymentMode: mode,
+      address,
+      note: input.note,
+      prescriptionFileKeys: input.prescriptionFileKeys,
+    };
+    // Online: nothing is booked yet — the app opens Checkout, then verifies (POST lab-bookings/payments/:id/verify).
+    if (mode !== 'COD') return { awaitingPayment: true as const, ...(await this.payments.start(userId, create)) };
+    const b = await this.labs.create(create, { kind: 'CUSTOMER', userId });
     return this.detail(userId, b.id);
+  }
+
+  async verifyPayment(userId: string, paymentId: string, body: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) {
+    const r = await this.payments.verify(userId, paymentId, body);
+    return this.detail(userId, r.bookingId);
+  }
+
+  async abandonPayment(userId: string, paymentId: string) {
+    const r = await this.payments.abandon(userId, paymentId);
+    return r.booked ? { booked: true, booking: await this.detail(userId, r.bookingId) } : { booked: false };
   }
 
   async list(userId: string) {
