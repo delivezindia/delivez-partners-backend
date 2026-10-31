@@ -5,7 +5,7 @@ import { haversineKm } from '../../common/geo';
 import { EventBus } from '../../events/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderStateService } from '../orders/order-state.service';
-import { DELIVERY_FEE, OrdersService, type ItemInput } from '../orders/orders.service';
+import { DEFAULT_MAX_QTY, DELIVERY_FEE, OrdersService, type ItemInput } from '../orders/orders.service';
 import { LocalAccountService } from './local-account.service';
 import { PaymentsService } from '../payments/payments.service';
 import { StorageService } from '../files/storage.service';
@@ -38,9 +38,11 @@ export interface CheckoutInput {
 /** A basket line the customer has to fix before ordering. */
 type Problem = {
   productId: string;
-  code: 'GONE' | 'UNAVAILABLE' | 'OUT_OF_STOCK' | 'FEW_LEFT' | 'OPTIONS_CHANGED';
+  code: 'GONE' | 'UNAVAILABLE' | 'OUT_OF_STOCK' | 'FEW_LEFT' | 'OPTIONS_CHANGED' | 'MAX_QTY';
   name: string;
   left?: number;
+  /** MAX_QTY: the most the customer may order of this item. */
+  max?: number;
 };
 
 const ORDER_INCLUDE = {
@@ -156,6 +158,9 @@ export class LocalOrdersService {
     });
     const now = new Date();
     const problems: Problem[] = [];
+    // The per-order limit counts every line of an item (one line per size or add-on choice).
+    const wanted = new Map<string, number>();
+    for (const it of input.items) wanted.set(it.productId, (wanted.get(it.productId) ?? 0) + it.qty);
     const lines = input.items.map((it) => {
       const p = products.find((x) => x.id === it.productId);
       if (!p || p.deletedAt) {
@@ -176,6 +181,8 @@ export class LocalOrdersService {
           name: p.name,
           left,
         });
+      const max = p.maxQtyPerOrder ?? DEFAULT_MAX_QTY;
+      if (wanted.get(p.id)! > max && !problems.some((x) => x.productId === p.id && x.code === 'MAX_QTY')) problems.push({ productId: p.id, code: 'MAX_QTY', name: p.name, max });
       const variant = it.variantId ? p.variants.find((v) => v.id === it.variantId) : p.variants.find((v) => v.isDefault);
       const all = p.addonGroups.flatMap((g) => g.addons);
       const addons = (it.addonIds ?? []).map((id) => all.find((a) => a.id === id));

@@ -13,6 +13,16 @@ export class ApiError extends HttpException {
   }
 }
 
+/** Errors from Express middleware (body-parser…) carry their own 4xx status: the request was bad, the server is fine. */
+type ClientError = { status: number; type?: string };
+const isClientError = (e: unknown): e is ClientError => {
+  const status = (e as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500;
+};
+const CLIENT_ERROR: Record<string, { code: string; message: string }> = {
+  'entity.too.large': { code: 'PAYLOAD_TOO_LARGE', message: 'Request is too large' },
+};
+
 @Catch()
 export class ApiExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger('ApiException');
@@ -37,6 +47,11 @@ export class ApiExceptionFilter implements ExceptionFilter {
       const body = exception.getResponse();
       code = HttpStatus[status] ?? 'HTTP_ERROR';
       message = typeof body === 'string' ? body : ((body as { message?: string }).message ?? exception.message);
+    } else if (isClientError(exception)) {
+      status = exception.status;
+      const known = CLIENT_ERROR[exception.type ?? ''];
+      code = known?.code ?? HttpStatus[status] ?? 'BAD_REQUEST';
+      message = known?.message ?? 'The request could not be processed';
     } else {
       this.logger.error(exception instanceof Error ? exception.stack : String(exception), req.correlationId);
     }

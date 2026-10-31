@@ -73,6 +73,8 @@ export const ACCEPT_TIMEOUT_SECONDS = 180;
 /** A prescription not reviewed in this time is cancelled and refunded (the customer is waiting). */
 export const RX_REVIEW_MINUTES = 15;
 export const DELIVERY_FEE = 3000; // paise — flat until pricing lands
+/** Most of one item a customer can order at once when the shop hasn't set its own limit. */
+export const DEFAULT_MAX_QTY = 20;
 const OTP_ATTEMPTS = 5;
 
 const ORDER_INCLUDE = {

@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { correlationId } from './common/correlation-id.middleware';
+import { securityHeaders } from './common/security-headers.middleware';
 import { ApiExceptionFilter } from './common/api-exception.filter';
 import { corsOrigin } from './common/public-url';
 import { docsBasicAuth, docsMode, DOCS_PATHS } from './common/docs-auth';
@@ -16,6 +17,9 @@ async function bootstrap() {
   // Frontends on other domains: list them in CORS_ORIGINS (localhost is always allowed for dev).
   app.enableCors({ origin: corsOrigin, credentials: true });
   app.use(correlationId);
+  // Don't announce the server software; add the basic hardening headers.
+  app.getHttpAdapter().getInstance().disable('x-powered-by');
+  app.use(securityHeaders);
   app.useGlobalFilters(new ApiExceptionFilter());
   app.enableShutdownHooks();
 

@@ -6,7 +6,7 @@ import { closingNow, nextOpening } from '../../common/hours';
 import { PrismaService } from '../../prisma/prisma.service';
 import { imageUrl } from '../catalog/catalog.service';
 import { travelMinutes } from '../orders/order-state.service';
-import { DELIVERY_FEE } from '../orders/orders.service';
+import { DEFAULT_MAX_QTY, DELIVERY_FEE } from '../orders/orders.service';
 
 /** Labs are still listed for walk-in slot booking up to this far (a lab visit, not an order pickup). */
 const LAB_WALK_IN_KM = 10;
@@ -182,7 +182,7 @@ export class LocalStoresService {
         available: !paused && (left == null || left > 0),
         // Shows "Only 3 left" without revealing the stock count above a handful.
         fewLeft: left != null && left > 0 && left <= 5 ? left : null,
-        maxQty: Math.min(p.maxQtyPerOrder ?? 20, left ?? 20),
+        maxQty: Math.min(p.maxQtyPerOrder ?? DEFAULT_MAX_QTY, left ?? DEFAULT_MAX_QTY),
       };
     });
     const used = new Set(products.map((p) => p.categoryId));
