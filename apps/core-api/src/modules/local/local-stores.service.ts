@@ -1,8 +1,8 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Prisma, Vertical } from '@delivez/db';
 import { ApiError } from '../../common/api-exception.filter';
-import { haversineKm } from '../../common/geo';
-import { nextOpening } from '../../common/hours';
+import { bearingDeg, haversineKm } from '../../common/geo';
+import { closingNow, nextOpening } from '../../common/hours';
 import { PrismaService } from '../../prisma/prisma.service';
 import { imageUrl } from '../catalog/catalog.service';
 import { travelMinutes } from '../orders/order-state.service';
@@ -82,7 +82,11 @@ export class LocalStoresService {
           coverUrl: img(s.coverUrl),
           area: [s.landmark, s.city?.name].filter(Boolean).join(', ') || null,
           distanceKm: km,
+          /** Which way the shop is from the address (degrees, 0 = north), for maps of what's around. */
+          bearing: bearingDeg(q.lat, q.lng, s.lat!, s.lng!),
           open,
+          /** When today's opening hours end ("HH:MM"); null without set hours. */
+          closesAt: open ? closingNow(s.timings, now) : null,
           busy: s.openState === 'BUSY',
           // Lab tests are booked into slots, so a closed lab can still take bookings.
           bookable: s.vertical === 'DIAGNOSTICS',

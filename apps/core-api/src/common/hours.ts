@@ -39,6 +39,23 @@ export function isWithinHours(slots: Slot[], holidays: Date[], now: Date, timeZo
   return slots.some((s) => !s.isClosed && s.dayOfWeek === dayOfWeek && minutes >= toMin(s.opensAt) && minutes < toMin(s.closesAt));
 }
 
+/**
+ * When the slot the store is in right now ends ("HH:MM"), following back-to-back slots on the same day.
+ * Null when it has no set hours or isn't within them.
+ */
+export function closingNow(slots: Slot[], now: Date, timeZone = 'Asia/Kolkata'): string | null {
+  const { dayOfWeek, minutes } = localParts(now, timeZone);
+  const today = slots.filter((s) => !s.isClosed && s.dayOfWeek === dayOfWeek);
+  const slot = today.find((s) => minutes >= toMin(s.opensAt) && minutes < toMin(s.closesAt));
+  if (!slot) return null;
+  let end = slot.closesAt;
+  for (;;) {
+    const next = today.find((s) => s.opensAt === end && toMin(s.closesAt) > toMin(end));
+    if (!next) return end;
+    end = next.closesAt;
+  }
+}
+
 /** Next opening time today/this week as "Mon 10:00", for friendly messages. */
 export function nextOpening(slots: Slot[], now: Date, timeZone = 'Asia/Kolkata'): string | null {
   const { dayOfWeek, minutes } = localParts(now, timeZone);

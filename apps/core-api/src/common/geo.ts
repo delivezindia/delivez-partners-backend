@@ -29,6 +29,15 @@ export function haversineKm(aLat: number, aLng: number, bLat: number, bLng: numb
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
+/** Compass direction from a to b in whole degrees: 0 north, 90 east, 180 south, 270 west. */
+export function bearingDeg(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const r = Math.PI / 180;
+  const dLng = (bLng - aLng) * r;
+  const y = Math.sin(dLng) * Math.cos(bLat * r);
+  const x = Math.cos(aLat * r) * Math.sin(bLat * r) - Math.sin(aLat * r) * Math.cos(bLat * r) * Math.cos(dLng);
+  return Math.round((Math.atan2(y, x) / r + 360) % 360) % 360;
+}
+
 /** Ray-casting test against the outer ring of a GeoJSON Polygon ([lng, lat] pairs). */
 export function pointInPolygon(lat: number, lng: number, polygon: unknown): boolean {
   const ring = (polygon as { type?: string; coordinates?: number[][][] })?.coordinates?.[0];

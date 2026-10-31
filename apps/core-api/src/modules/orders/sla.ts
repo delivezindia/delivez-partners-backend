@@ -187,3 +187,12 @@ export function cancellationOutcome(i: OutcomeInput): Outcome {
     countsAgainst,
   };
 }
+
+/**
+ * How much of a cancellation refund can still go back: never more than was actually paid, less what was already
+ * refunded (an item that ran out, a cheaper substitute…). The order total has already shrunk by those refunds, so it
+ * can't be used as the cap.
+ */
+export function refundLeft(due: number, paid: number, alreadyRefunded: number) {
+  return Math.max(0, Math.min(due, paid - alreadyRefunded));
+}

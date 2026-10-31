@@ -5,7 +5,7 @@ import { EventBus } from '../../events/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { checkTransition, type ActorKind, type OrderAction } from './order-state';
 import { RETURN_WINDOW_MINUTES, returnsAllowed } from './returns-rules';
-import { CANCEL_TEXT, cancellationOutcome, stageOf, type CancelCode } from './sla';
+import { CANCEL_TEXT, cancellationOutcome, refundLeft, stageOf, type CancelCode } from './sla';
 
 export interface OrderActor {
   kind: ActorKind;
@@ -238,7 +238,8 @@ export class OrderStateService {
     if (!['CAPTURED', 'AUTHORIZED'].includes(order.paymentStatus) || due <= 0) return {};
     const payment = await tx.payment.findFirst({ where: { orderId: order.id, status: { in: ['CAPTURED', 'AUTHORIZED'] } } });
     const refunded = await tx.refund.aggregate({ where: { orderId: order.id }, _sum: { amount: true } });
-    const amount = Math.min(due, order.grandTotal - (refunded._sum.amount ?? 0));
+    // Without a payment row (simulated payments) the current total is what is still held.
+    const amount = payment ? refundLeft(due, payment.amount, refunded._sum.amount ?? 0) : Math.min(due, order.grandTotal);
     if (amount > 0) {
       await tx.refund.create({ data: { orderId: order.id, paymentId: payment?.id, amount, reason, initiatedBy } });
       await this.events.publish(tx, { type: 'payment.refund_initiated', data: { storeId: order.storeId, orderId: order.id, amount, reason }, actor: { type: 'SYSTEM' } });

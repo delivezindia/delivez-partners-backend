@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { CANCEL_CODES, CANCEL_TEXT, FAIL_CODES, OPS_CANCEL_CODES, cancellationOutcome, stageOf, type CancelCode, type Stage } from './sla';
+import { CANCEL_CODES, CANCEL_TEXT, FAIL_CODES, OPS_CANCEL_CODES, cancellationOutcome, stageOf, type CancelCode, type Stage, refundLeft } from './sla';
 
 // ₹400 items + ₹30 delivery + ₹20 packaging = ₹450
 const totals = {
@@ -125,5 +125,19 @@ describe('order SLA: who pays when an order ends early', () => {
   it('customer asks support to cancel while cooking → food charged; a grocery order is free', () => {
     assert.equal(run('OPS_CUSTOMER_REQUEST', 'PREPARING').refund, 0);
     assert.equal(run('OPS_CUSTOMER_REQUEST', 'PREPARING', 'GROCERY').refund, 43000);
+  });
+});
+
+describe('refundLeft (cancelling after part of the order was refunded)', () => {
+  it('pays back the rest of what was paid', () => {
+    // Paid ₹329, ₹199 already back for an item that ran out; the cancellation is due ₹130.
+    assert.equal(refundLeft(13000, 32900, 19900), 13000);
+  });
+  it('never more than was paid in total', () => {
+    assert.equal(refundLeft(50000, 32900, 19900), 13000);
+    assert.equal(refundLeft(13000, 32900, 32900), 0);
+  });
+  it('nothing refunded yet: the amount due', () => {
+    assert.equal(refundLeft(23100, 23100, 0), 23100);
   });
 });
