@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { z } from 'zod';
 import type { ApiRequest, AuthUser } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { Apps, CurrentUser } from '../identity/auth.decorators';
 import { OnboardingService, type Actor } from '../onboarding/onboarding.service';
 import type { StoreAccess } from '../partners/partner-access.service';
@@ -149,7 +150,7 @@ export class StoresController {
 
   @Get('reviews')
   @PartnerRoles('OWNER', 'MANAGER', 'KITCHEN_LEAD', 'COUNTER_STAFF', 'PHARMACIST')
-  listReviews(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(reviewsQuery)) q: z.infer<typeof reviewsQuery>) {
+  listReviews(@Param('storeId', ParseUUIDPipe) storeId: string, @ZodQuery(reviewsQuery) q: z.infer<typeof reviewsQuery>) {
     return this.reviews.list(storeId, q);
   }
 

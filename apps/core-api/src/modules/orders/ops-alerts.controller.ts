@@ -1,8 +1,9 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import type { ApiRequest } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { Apps } from '../identity/auth.decorators';
 import { AdminGuard, AdminRoles, CurrentAdmin, ROLES, type AdminContext } from '../admin/admin.guard';
 import type { OrderActor } from './order-state.service';
@@ -52,7 +53,7 @@ export class OpsAlertsController {
   }
 
   @Get('alerts/log')
-  log(@Query(new ZodValidationPipe(logQuery)) q: z.infer<typeof logQuery>, @CurrentAdmin() a: AdminContext) {
+  log(@ZodQuery(logQuery) q: z.infer<typeof logQuery>, @CurrentAdmin() a: AdminContext) {
     return this.ops.log(a, q);
   }
 

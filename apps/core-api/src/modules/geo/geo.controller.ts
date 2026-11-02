@@ -1,8 +1,9 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { Public } from '../identity/auth.decorators';
 import { GeoService } from './geo.service';
 
@@ -43,12 +44,12 @@ export class GeoController {
 
   // Authenticated: these proxy a rate-limited third-party service.
   @Get('search')
-  search(@Query(new ZodValidationPipe(searchSchema)) query: z.infer<typeof searchSchema>) {
+  search(@ZodQuery(searchSchema) query: z.infer<typeof searchSchema>) {
     return this.geo.search(query.q);
   }
 
   @Get('reverse')
-  reverse(@Query(new ZodValidationPipe(reverseSchema)) query: z.infer<typeof reverseSchema>) {
+  reverse(@ZodQuery(reverseSchema) query: z.infer<typeof reverseSchema>) {
     return this.geo.reverse(query.lat, query.lng);
   }
 }

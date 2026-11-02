@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { RequireIdempotency } from '../../common/idempotency.interceptor';
 import type { ApiRequest, AuthUser } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { AdminGuard, AdminRoles, CurrentAdmin, ROLES, type AdminContext } from '../admin/admin.guard';
 import { Apps, CurrentUser } from '../identity/auth.decorators';
 import { indianPhone } from '../identity/phone';
@@ -66,7 +67,7 @@ export class PartnerLabBookingsController {
 
   @Get('lab-slots')
   @PartnerRoles(...VIEW)
-  slots(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(slotsQuery)) q: z.infer<typeof slotsQuery>) {
+  slots(@Param('storeId', ParseUUIDPipe) storeId: string, @ZodQuery(slotsQuery) q: z.infer<typeof slotsQuery>) {
     return this.labs.slots(storeId, q.date, q.type);
   }
 
@@ -78,7 +79,7 @@ export class PartnerLabBookingsController {
 
   @Get('lab-bookings')
   @PartnerRoles(...VIEW)
-  list(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(listQuery)) q: z.infer<typeof listQuery>) {
+  list(@Param('storeId', ParseUUIDPipe) storeId: string, @ZodQuery(listQuery) q: z.infer<typeof listQuery>) {
     return this.labs.list(storeId, q.tab as BookingTab, q.date);
   }
 
@@ -228,7 +229,7 @@ export class AdminLabBookingsController {
   constructor(private readonly labs: LabBookingsService) {}
 
   @Get()
-  list(@Query(new ZodValidationPipe(adminListQuery)) q: z.infer<typeof adminListQuery>) {
+  list(@ZodQuery(adminListQuery) q: z.infer<typeof adminListQuery>) {
     return this.labs.adminList(q);
   }
 
@@ -247,7 +248,7 @@ export class AdminLabBookingsController {
   /** Health data: admins must state a purpose; the open is logged. */
   @Get(':id/reports/:reportId/file')
   @AdminRoles('FOUNDER', 'HEAD_OF_OPS', 'COMPLIANCE', 'SUPPORT')
-  reportFile(@Param('id', ParseUUIDPipe) id: string, @Param('reportId', ParseUUIDPipe) reportId: string, @Query(new ZodValidationPipe(purposeQuery)) q: z.infer<typeof purposeQuery>, @CurrentAdmin() a: AdminContext, @Req() r: ApiRequest) {
+  reportFile(@Param('id', ParseUUIDPipe) id: string, @Param('reportId', ParseUUIDPipe) reportId: string, @ZodQuery(purposeQuery) q: z.infer<typeof purposeQuery>, @CurrentAdmin() a: AdminContext, @Req() r: ApiRequest) {
     return this.labs.reportFile(id, reportId, admin(a, r), q.purpose, null);
   }
 

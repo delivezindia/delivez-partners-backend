@@ -1,8 +1,9 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import type { ApiRequest } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { Apps } from '../identity/auth.decorators';
 import { AdminGuard, AdminRoles, CurrentAdmin, ROLES, type AdminContext } from './admin.guard';
 import { AdminService } from './admin.service';
@@ -65,7 +66,7 @@ export class AdminController {
   }
 
   @Get('onboarding/pipeline')
-  pipeline(@Query(new ZodValidationPipe(pipelineQuery)) query: z.infer<typeof pipelineQuery>, @CurrentAdmin() admin: AdminContext) {
+  pipeline(@ZodQuery(pipelineQuery) query: z.infer<typeof pipelineQuery>, @CurrentAdmin() admin: AdminContext) {
     return this.admin.pipeline(admin, query);
   }
 
@@ -75,12 +76,12 @@ export class AdminController {
   }
 
   @Get('documents')
-  documents(@Query(new ZodValidationPipe(docQueueQuery)) query: z.infer<typeof docQueueQuery>, @CurrentAdmin() admin: AdminContext) {
+  documents(@ZodQuery(docQueueQuery) query: z.infer<typeof docQueueQuery>, @CurrentAdmin() admin: AdminContext) {
     return this.admin.documentQueue(admin, query.status);
   }
 
   @Get('documents/by-store')
-  documentsByStore(@Query(new ZodValidationPipe(byStoreQuery)) query: z.infer<typeof byStoreQuery>, @CurrentAdmin() admin: AdminContext) {
+  documentsByStore(@ZodQuery(byStoreQuery) query: z.infer<typeof byStoreQuery>, @CurrentAdmin() admin: AdminContext) {
     return this.admin.documentsByStore(admin, query);
   }
 

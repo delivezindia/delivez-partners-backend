@@ -1,11 +1,12 @@
 import { FAIL_CODES, OPS_CANCEL_CODES } from './sla';
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiError } from '../../common/api-exception.filter';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { RequireIdempotency } from '../../common/idempotency.interceptor';
 import type { ApiRequest, AuthUser } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { AdminGuard, AdminRoles, CurrentAdmin, ROLES, type AdminContext } from '../admin/admin.guard';
 import { Apps, CurrentUser } from '../identity/auth.decorators';
 import { indianPhone } from '../identity/phone';
@@ -90,7 +91,7 @@ export class PartnerOrdersController {
 
   @Get()
   @PartnerRoles(...VIEW)
-  list(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(listQuery)) q: z.infer<typeof listQuery>) {
+  list(@Param('storeId', ParseUUIDPipe) storeId: string, @ZodQuery(listQuery) q: z.infer<typeof listQuery>) {
     return this.orders.list(storeId, q.tab as OrderTab, q.cursor, q.limit);
   }
 
@@ -289,7 +290,7 @@ export class AdminOrdersController {
   }
 
   @Get('orders')
-  list(@Query(new ZodValidationPipe(adminListQuery)) q: z.infer<typeof adminListQuery>, @CurrentAdmin() a: AdminContext) {
+  list(@ZodQuery(adminListQuery) q: z.infer<typeof adminListQuery>, @CurrentAdmin() a: AdminContext) {
     return this.dispatch.adminList(q, a.cityIds);
   }
 

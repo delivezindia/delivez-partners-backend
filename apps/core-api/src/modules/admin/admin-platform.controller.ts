@@ -1,8 +1,9 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import type { ApiRequest } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { Apps } from '../identity/auth.decorators';
 import { indianPhone } from '../identity/phone';
 import { AdminGuard, AdminRoles, CurrentAdmin, ROLES, type AdminContext } from './admin.guard';
@@ -143,7 +144,7 @@ export class AdminPlatformController {
   // --- Audit log ------------------------------------------------------
   @Get('audit')
   @AdminRoles(...ROLES.VIEW_AUDIT)
-  audit(@Query(new ZodValidationPipe(auditQuery)) q: z.infer<typeof auditQuery>) {
+  audit(@ZodQuery(auditQuery) q: z.infer<typeof auditQuery>) {
     return this.platform.auditLog(q);
   }
 }

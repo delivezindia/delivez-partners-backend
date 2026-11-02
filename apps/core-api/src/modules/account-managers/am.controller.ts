@@ -1,8 +1,9 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../common/api-exception.filter';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { Apps } from '../identity/auth.decorators';
 import { AdminGuard, AdminRoles, CurrentAdmin, ROLES, type AdminContext } from '../admin/admin.guard';
 import { AmService } from './am.service';
@@ -26,7 +27,7 @@ const taskSchema = z.object({
   dueAt: z.coerce.date(),
 });
 const tasksQuery = z.object({ tab: z.enum(['today', 'overdue', 'upcoming', 'done']).default('today') });
-const issuesQuery = z.object({ status: z.enum(['open', 'resolved']).default('open') });
+const issuesQuery = z.object({ status: z.enum(['open', 'resolved']).default('open'), limit: z.coerce.number().int().min(1).max(500).default(100) });
 const noteSchema = z.object({ note: z.string().trim().max(500).optional() });
 const assignSchema = z.object({ accountManagerId: z.string().uuid().nullable() });
 
@@ -46,7 +47,7 @@ export class AmController {
   }
 
   @Get('stores')
-  stores(@Query(new ZodValidationPipe(listQuery)) q: z.infer<typeof listQuery>, @CurrentAdmin() a: AdminContext) {
+  stores(@ZodQuery(listQuery) q: z.infer<typeof listQuery>, @CurrentAdmin() a: AdminContext) {
     return this.am.list(a, q.sort);
   }
 
@@ -78,7 +79,7 @@ export class AmController {
   }
 
   @Get('tasks')
-  tasks(@Query(new ZodValidationPipe(tasksQuery)) q: z.infer<typeof tasksQuery>, @CurrentAdmin() a: AdminContext) {
+  tasks(@ZodQuery(tasksQuery) q: z.infer<typeof tasksQuery>, @CurrentAdmin() a: AdminContext) {
     return this.am.tasks(a, q.tab);
   }
 
@@ -94,8 +95,8 @@ export class AmController {
   }
 
   @Get('issues')
-  issues(@Query(new ZodValidationPipe(issuesQuery)) q: z.infer<typeof issuesQuery>, @CurrentAdmin() a: AdminContext) {
-    return this.am.issues(a, q.status);
+  issues(@ZodQuery(issuesQuery) q: z.infer<typeof issuesQuery>, @CurrentAdmin() a: AdminContext) {
+    return this.am.issues(a, q.status, q.limit);
   }
 
   @Post('issues/:id/escalate')

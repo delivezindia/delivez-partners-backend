@@ -4,6 +4,7 @@ import type { OtpPurpose } from '@delivez/db';
 import { PrismaService } from '../../prisma/prisma.service';
 import { KvService } from '../../common/kv/kv.service';
 import { ApiError } from '../../common/api-exception.filter';
+import { serverSecret } from '../../common/secrets';
 import { OTP_SENDER, type OtpSender } from './otp-sender';
 import { showOtpInResponse } from './otp-visibility';
 
@@ -15,7 +16,7 @@ const MAX_ATTEMPTS = 5;
 
 @Injectable()
 export class OtpService implements OnModuleInit {
-  private readonly pepper = process.env.OTP_PEPPER ?? 'dev-otp-pepper';
+  private readonly pepper = serverSecret('OTP_PEPPER', 'dev-otp-pepper');
 
   constructor(
     private readonly prisma: PrismaService,

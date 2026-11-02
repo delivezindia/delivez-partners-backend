@@ -12,5 +12,8 @@
     "sourceMap": true,
     "strictPropertyInitialization": false
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  "watchOptions": {
+    "excludeDirectories": ["../local-web", "../partners-web", "../admin-web", "./dist", "./uploads", "./.keys"]
+  }
 }

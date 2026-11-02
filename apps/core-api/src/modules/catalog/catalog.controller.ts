@@ -1,10 +1,11 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Req, UseGuards, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
 import { ApiError } from '../../common/api-exception.filter';
 import type { ApiRequest, AuthUser } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../files/storage.service';
 import { Apps, CurrentUser } from '../identity/auth.decorators';
@@ -89,7 +90,7 @@ export class CatalogController {
 
   @Get('products')
   @PartnerRoles(...VIEW)
-  products(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(productQuerySchema)) q: z.infer<typeof productQuerySchema>) {
+  products(@Param('storeId', ParseUUIDPipe) storeId: string, @ZodQuery(productQuerySchema) q: z.infer<typeof productQuerySchema>) {
     return this.catalog.products(storeId, q);
   }
 
@@ -179,13 +180,13 @@ export class CatalogController {
 
   @Get('inventory')
   @PartnerRoles(...STOCK)
-  inventoryList(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(inventoryQuery)) q: z.infer<typeof inventoryQuery>) {
+  inventoryList(@Param('storeId', ParseUUIDPipe) storeId: string, @ZodQuery(inventoryQuery) q: z.infer<typeof inventoryQuery>) {
     return this.inventory.list(storeId, q.filter, q.days as ExpiryWindow);
   }
 
   @Get('inventory/expiry.csv')
   @PartnerRoles(...STOCK)
-  async expiryCsv(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(inventoryQuery)) q: z.infer<typeof inventoryQuery>, @Res() res: Response) {
+  async expiryCsv(@Param('storeId', ParseUUIDPipe) storeId: string, @ZodQuery(inventoryQuery) q: z.infer<typeof inventoryQuery>, @Res() res: Response) {
     const r = await this.inventory.expiryCsv(storeId, q.days as ExpiryWindow);
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="${r.filename}"`);

@@ -1,8 +1,8 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { Apps } from '../identity/auth.decorators';
 import { PartnerRoles, StoreAccessGuard } from '../partners/store-access.guard';
 import { OrderReportsService } from './order-reports.service';
@@ -26,13 +26,13 @@ export class OrderReportsController {
 
   @Get('summary')
   @PartnerRoles(...MONEY)
-  summary(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(summaryQuery)) q: z.infer<typeof summaryQuery>) {
+  summary(@Param('storeId', ParseUUIDPipe) storeId: string, @ZodQuery(summaryQuery) q: z.infer<typeof summaryQuery>) {
     return this.reports.summary(storeId, q.days as 1 | 7 | 30);
   }
 
   @Get('orders.csv')
   @PartnerRoles(...MONEY)
-  async csv(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(csvQuery)) q: z.infer<typeof csvQuery>, @Res() res: Response) {
+  async csv(@Param('storeId', ParseUUIDPipe) storeId: string, @ZodQuery(csvQuery) q: z.infer<typeof csvQuery>, @Res() res: Response) {
     const r = await this.reports.csv(storeId, q.from, q.to);
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="${r.filename}"`);
@@ -42,7 +42,7 @@ export class OrderReportsController {
 
   @Get('gst.csv')
   @PartnerRoles(...MONEY)
-  async gst(@Param('storeId', ParseUUIDPipe) storeId: string, @Query(new ZodValidationPipe(gstQuery)) q: z.infer<typeof gstQuery>, @Res() res: Response) {
+  async gst(@Param('storeId', ParseUUIDPipe) storeId: string, @ZodQuery(gstQuery) q: z.infer<typeof gstQuery>, @Res() res: Response) {
     const r = await this.reports.gstCsv(storeId, q.month);
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="${r.filename}"`);

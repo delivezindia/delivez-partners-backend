@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Module, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Module, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import type { ApiRequest } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { AdminGuard, AdminRoles, CurrentAdmin, ROLES, type AdminContext } from '../admin/admin.guard';
 import { Apps, Public } from '../identity/auth.decorators';
 import { COUPON_KINDS } from './coupon-rules';
@@ -46,7 +47,7 @@ export class AdminCouponsController {
 
   @Get()
   @AdminRoles(...ROLES.READ)
-  list(@Query(new ZodValidationPipe(listQuery)) q: z.infer<typeof listQuery>) {
+  list(@ZodQuery(listQuery) q: z.infer<typeof listQuery>) {
     return this.coupons.list(q.status);
   }
 

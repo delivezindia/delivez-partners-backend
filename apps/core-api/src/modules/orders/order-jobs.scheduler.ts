@@ -8,6 +8,7 @@ import { KvService } from '../../common/kv/kv.service';
 import { EventBus } from '../../events/event-bus.service';
 import { CANCEL_TEXT, SLA, type SlaBreach } from './sla';
 import { OpsAlertsService } from './ops-alerts.service';
+import { everyRow } from '../../common/every-row';
 
 const TICK_MS = 5_000;
 /** Accepted orders move to Preparing on their own after this (plan §10: auto-PREPARING after 60 s). */
@@ -143,22 +144,25 @@ export class OrderJobsScheduler implements OnModuleInit, OnModuleDestroy {
       minutes: number;
     }[] = [];
 
-    const kitchen = await this.prisma.order.findMany({
-      where: {
-        status: { in: ['ACCEPTED', 'PREPARING', 'READY_SOON'] },
-        acceptedAt: { not: null },
-        isTestOrder: false,
-      },
-      select: {
-        id: true,
-        storeId: true,
-        orderNumber: true,
-        acceptedAt: true,
-        promisedPrepMinutes: true,
-        store: { select: { cityId: true } },
-      },
-      take: 300,
-    });
+    // Accepted less than PREP_LATE_MINUTES ago can't be late yet (prep time is never negative).
+    const kitchen = await everyRow((page) =>
+      this.prisma.order.findMany({
+        where: {
+          status: { in: ['ACCEPTED', 'PREPARING', 'READY_SOON'] },
+          acceptedAt: { lt: new Date(now.getTime() - SLA.PREP_LATE_MINUTES * 60_000) },
+          isTestOrder: false,
+        },
+        select: {
+          id: true,
+          storeId: true,
+          orderNumber: true,
+          acceptedAt: true,
+          promisedPrepMinutes: true,
+          store: { select: { cityId: true } },
+        },
+        ...page,
+      }),
+    );
     for (const o of kitchen) {
       const due = new Date(o.acceptedAt!.getTime() + (o.promisedPrepMinutes ?? 20) * 60_000);
       const late = min(due);
@@ -173,39 +177,41 @@ export class OrderJobsScheduler implements OnModuleInit, OnModuleDestroy {
       else if (late >= SLA.PREP_LATE_MINUTES) breaches.push({ ...base, kind: 'PREP_LATE' });
     }
 
-    const waiting = await this.prisma.order.findMany({
-      where: {
-        isTestOrder: false,
-        OR: [
-          {
-            status: 'READY',
-            fulfilmentType: 'DELIVERY',
-            readyAt: {
-              lt: new Date(now.getTime() - SLA.NO_RIDER_MINUTES * 60_000),
+    const waiting = await everyRow((page) =>
+      this.prisma.order.findMany({
+        where: {
+          isTestOrder: false,
+          OR: [
+            {
+              status: 'READY',
+              fulfilmentType: 'DELIVERY',
+              readyAt: {
+                lt: new Date(now.getTime() - SLA.NO_RIDER_MINUTES * 60_000),
+              },
+              deliveryTask: { status: { in: ['CREATED', 'SEARCHING_RIDER'] } },
             },
-            deliveryTask: { status: { in: ['CREATED', 'SEARCHING_RIDER'] } },
-          },
-          {
-            status: 'ARRIVED',
-            deliveryTask: {
-              arrivedDropAt: {
-                lt: new Date(now.getTime() - SLA.DOOR_WAIT_MINUTES * 60_000),
+            {
+              status: 'ARRIVED',
+              deliveryTask: {
+                arrivedDropAt: {
+                  lt: new Date(now.getTime() - SLA.DOOR_WAIT_MINUTES * 60_000),
+                },
               },
             },
-          },
-        ],
-      },
-      select: {
-        id: true,
-        storeId: true,
-        orderNumber: true,
-        status: true,
-        readyAt: true,
-        deliveryTask: { select: { arrivedDropAt: true } },
-        store: { select: { cityId: true } },
-      },
-      take: 300,
-    });
+          ],
+        },
+        select: {
+          id: true,
+          storeId: true,
+          orderNumber: true,
+          status: true,
+          readyAt: true,
+          deliveryTask: { select: { arrivedDropAt: true } },
+          store: { select: { cityId: true } },
+        },
+        ...page,
+      }),
+    );
     for (const o of waiting) {
       const door = o.status === 'ARRIVED';
       breaches.push({

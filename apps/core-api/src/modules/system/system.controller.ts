@@ -87,6 +87,8 @@ export class SystemController {
     add(uploadsWritable ? 'ok' : 'error', 'Uploads', uploadsWritable ? `Writable: ${uploadDir}` : `Cannot write to ${uploadDir} — create it and give the API user access`);
     if (prod && !process.env.PUBLIC_API_URL) add('warn', 'Addresses', 'PUBLIC_API_URL is empty — file and photo links only work when the web apps share the API domain');
     if (prod && !cors.length) add('warn', 'Addresses', 'CORS_ORIGINS is empty — browsers on other domains cannot call the API');
+    const derived = ['FILE_URL_SECRET', 'OTP_PEPPER'].filter((k) => !process.env[k]);
+    if (prod && derived.length) add('warn', 'Secrets', `${derived.join(' and ')} not set in .env — using values derived from JWT_PRIVATE_KEY. Set your own (openssl rand -hex 32).`);
 
     return {
       overall: checks.some((c) => c.level === 'error') ? 'error' : checks.some((c) => c.level === 'warn') ? 'warn' : 'ok',

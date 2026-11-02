@@ -5,6 +5,7 @@ import { createReadStream, createWriteStream, existsSync, mkdirSync, statSync, u
 import { dirname, resolve, sep } from 'node:path';
 import type { Readable } from 'node:stream';
 import { ApiError } from '../../common/api-exception.filter';
+import { serverSecret } from '../../common/secrets';
 
 export const ALLOWED_UPLOAD_TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -30,7 +31,7 @@ interface UploadClaims {
 @Injectable()
 export class StorageService {
   private readonly root = resolve(process.env.UPLOAD_DIR || resolve(__dirname, '../../../uploads'));
-  private readonly secret = process.env.FILE_URL_SECRET ?? 'dev-file-url-secret';
+  private readonly secret = serverSecret('FILE_URL_SECRET', 'dev-file-url-secret');
 
   presignUpload(prefix: string, contentType: string, size: number) {
     const ext = ALLOWED_UPLOAD_TYPES[contentType];

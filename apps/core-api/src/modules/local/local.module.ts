@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import type { AuthUser } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { Apps, CurrentUser, Public } from '../identity/auth.decorators';
 import { LocalAccountService } from './local-account.service';
 import { LocalOverviewService } from './local-overview.service';
@@ -139,18 +140,18 @@ export class LocalStoresController {
   ) {}
 
   @Get()
-  nearby(@Query(new ZodValidationPipe(nearbyQuery)) q: z.infer<typeof nearbyQuery>) {
+  nearby(@ZodQuery(nearbyQuery) q: z.infer<typeof nearbyQuery>) {
     return this.stores.nearby(q);
   }
 
   /** Hourly slots at a lab (home collection or walk-in) for one day. */
   @Get(':idOrSlug/lab-slots')
-  labSlots(@Param('idOrSlug') idOrSlug: string, @Query(new ZodValidationPipe(slotsQuery)) q: z.infer<typeof slotsQuery>) {
+  labSlots(@Param('idOrSlug') idOrSlug: string, @ZodQuery(slotsQuery) q: z.infer<typeof slotsQuery>) {
     return this.labs.slots(idOrSlug, q.date, q.type);
   }
 
   @Get(':idOrSlug')
-  menu(@Param('idOrSlug') idOrSlug: string, @Query(new ZodValidationPipe(menuQuery)) q: z.infer<typeof menuQuery>) {
+  menu(@Param('idOrSlug') idOrSlug: string, @ZodQuery(menuQuery) q: z.infer<typeof menuQuery>) {
     return this.stores.menu(idOrSlug, q.lat != null && q.lng != null ? { lat: q.lat, lng: q.lng } : undefined);
   }
 }

@@ -1,8 +1,9 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import type { AuthUser } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { AdminGuard, AdminRoles, CurrentAdmin, ROLES, type AdminContext } from '../admin/admin.guard';
 import { Apps, CurrentUser } from '../identity/auth.decorators';
 import type { StoreAccess } from '../partners/partner-access.service';
@@ -76,7 +77,7 @@ export class AdminSupportController {
 
   @Get()
   @AdminRoles(...ROLES.READ)
-  list(@Query(new ZodValidationPipe(adminListQuery)) q: z.infer<typeof adminListQuery>, @CurrentAdmin() a: AdminContext) {
+  list(@ZodQuery(adminListQuery) q: z.infer<typeof adminListQuery>, @CurrentAdmin() a: AdminContext) {
     return this.support.adminList(a, q);
   }
 

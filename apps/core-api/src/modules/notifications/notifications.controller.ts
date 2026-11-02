@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import type { AuthUser } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { CurrentUser, Public } from '../identity/auth.decorators';
 import { PushSender } from './push-sender';
 import { NotificationsService } from './notifications.service';
@@ -30,7 +31,7 @@ export class NotificationsController {
 
   @ApiBearerAuth()
   @Get('me/notifications')
-  list(@CurrentUser() u: AuthUser, @Query(new ZodValidationPipe(listQuery)) q: z.infer<typeof listQuery>) {
+  list(@CurrentUser() u: AuthUser, @ZodQuery(listQuery) q: z.infer<typeof listQuery>) {
     return this.notifications.list(u.userId, u.app, q.before, q.limit);
   }
 

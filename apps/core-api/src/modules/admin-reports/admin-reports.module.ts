@@ -1,8 +1,8 @@
-import { Controller, Get, Module, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Module, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { ZodQuery } from '../../common/zod-query';
 import { AdminGuard, AdminRoles, CurrentAdmin, ROLES, type AdminContext } from '../admin/admin.guard';
 import { Apps } from '../identity/auth.decorators';
 import { AdminReportsService } from './admin-reports.service';
@@ -20,13 +20,13 @@ export class AdminReportsController {
 
   @Get('cities')
   @AdminRoles(...ROLES.READ)
-  cities(@Query(new ZodValidationPipe(citiesQuery)) q: z.infer<typeof citiesQuery>, @CurrentAdmin() a: AdminContext) {
+  cities(@ZodQuery(citiesQuery) q: z.infer<typeof citiesQuery>, @CurrentAdmin() a: AdminContext) {
     return this.reports.cities(a, q.weeks);
   }
 
   @Get('cities.csv')
   @AdminRoles(...ROLES.READ)
-  async citiesCsv(@Query(new ZodValidationPipe(citiesQuery)) q: z.infer<typeof citiesQuery>, @CurrentAdmin() a: AdminContext, @Res() res: Response) {
+  async citiesCsv(@ZodQuery(citiesQuery) q: z.infer<typeof citiesQuery>, @CurrentAdmin() a: AdminContext, @Res() res: Response) {
     const r = await this.reports.citiesCsv(a, q.weeks);
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="${r.filename}"`);
@@ -35,7 +35,7 @@ export class AdminReportsController {
 
   @Get('store-health')
   @AdminRoles(...ROLES.READ)
-  health(@Query(new ZodValidationPipe(healthQuery)) q: z.infer<typeof healthQuery>, @CurrentAdmin() a: AdminContext) {
+  health(@ZodQuery(healthQuery) q: z.infer<typeof healthQuery>, @CurrentAdmin() a: AdminContext) {
     return this.reports.storeHealth(a, q.days);
   }
 }

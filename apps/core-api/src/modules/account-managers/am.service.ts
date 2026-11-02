@@ -369,14 +369,19 @@ export class AmService implements OnModuleInit, OnModuleDestroy {
 
   // ---- Issues
 
-  async issues(admin: AdminContext, status: 'open' | 'resolved') {
-    const rows = await this.prisma.amIssue.findMany({
-      where: { store: { accountManagerId: admin.adminId }, status: status === 'open' ? { not: 'RESOLVED' } : 'RESOLVED' },
-      orderBy: status === 'open' ? { dueAt: 'asc' } : { resolvedAt: 'desc' },
-      take: 100,
-      include: { store: { select: { id: true, name: true, phone: true } } },
-    });
-    return { issues: rows };
+  /** Most urgent first, `limit` at a time; `total` is the full count (the badge and "Show more"). */
+  async issues(admin: AdminContext, status: 'open' | 'resolved', limit = 100) {
+    const where: Prisma.AmIssueWhereInput = { store: { accountManagerId: admin.adminId }, status: status === 'open' ? { not: 'RESOLVED' } : 'RESOLVED' };
+    const [rows, total] = await Promise.all([
+      this.prisma.amIssue.findMany({
+        where,
+        orderBy: [status === 'open' ? { dueAt: 'asc' } : { resolvedAt: 'desc' }, { id: 'asc' }],
+        take: limit,
+        include: { store: { select: { id: true, name: true, phone: true } } },
+      }),
+      this.prisma.amIssue.count({ where }),
+    ]);
+    return { issues: rows, total };
   }
 
   private async myIssue(admin: AdminContext, issueId: string) {
