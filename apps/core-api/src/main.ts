@@ -34,6 +34,8 @@ async function bootstrap() {
   const port = Number(process.env.API_PORT ?? 4000);
   await app.listen(port);
   const docsNote = docs === 'off' ? 'docs off (set DOCS_USERNAME and DOCS_PASSWORD to enable)' : `docs at /docs${docs === 'password' ? ' (password protected)' : ''}`;
-  Logger.log(`Delivez Core API on http://localhost:${port}/v1 - ${docsNote}`, 'Bootstrap');
+  Logger.log(`Delivez Core API on http://localhost:${port}/v1 - running ${BUILD.commit ?? 'an unknown commit'} - ${docsNote}`, 'Bootstrap');
+  // Pulled but not rebuilt: say so loudly in the logs (pm2 logs delivez-api), not only on the System page.
+  if (BUILD.stale) Logger.error(`OLD CODE IS RUNNING: built from ${BUILD.commit}, but the folder is at ${BUILD.checkout}. Run ./deploy/backend/update.sh`, 'Bootstrap');
 }
 bootstrap();

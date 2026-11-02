@@ -2,9 +2,10 @@
 // what is actually running — not just what the folder was last pulled to.
 import { execSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = join(import.meta.dirname, '..');
+// (import.meta.dirname needs Node 20.11+; this works on any Node a server may have.)
+const root = fileURLToPath(new URL('..', import.meta.url));
 let commit = null;
 let commitDate = null;
 try {
@@ -12,5 +13,5 @@ try {
 } catch {
   /* not a git checkout */
 }
-writeFileSync(join(root, 'dist', 'build-info.json'), JSON.stringify({ commit, commitDate, builtAt: new Date().toISOString() }) + '\n');
+writeFileSync(new URL('../dist/build-info.json', import.meta.url), JSON.stringify({ commit, commitDate, builtAt: new Date().toISOString() }) + '\n');
 console.log(`build-info: ${commit ?? 'no git commit'}`);

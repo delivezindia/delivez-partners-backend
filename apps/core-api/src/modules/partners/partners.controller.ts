@@ -128,7 +128,13 @@ export class PartnersController {
     return this.prisma.$transaction(async (tx) => {
       const before = await tx.store.findUniqueOrThrow({ where: { id: storeId }, select: { status: true, openState: true } });
       if (body.openState !== 'CLOSED' && !['LIVE', 'LIMITED'].includes(before.status)) {
-        throw new ApiError(HttpStatus.CONFLICT, 'STORE_NOT_LIVE', 'The store can open once it is approved and live');
+        const why =
+          before.status === 'PAUSED'
+            ? 'Delivez has paused new orders for this store. You can open again once they resume it.'
+            : before.status === 'SUSPENDED'
+              ? 'This store is suspended. Contact Delivez support.'
+              : 'The store can open once it is approved and live';
+        throw new ApiError(HttpStatus.CONFLICT, 'STORE_NOT_LIVE', why);
       }
       if (before.openState === body.openState) return { storeId, openState: before.openState };
 
