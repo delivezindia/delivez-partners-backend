@@ -18,6 +18,7 @@ export class HealthController {
     } catch {
       db = 'down';
     }
-    return { status: db === 'up' ? 'ok' : 'degraded', db, version: BUILD.version, commit: BUILD.commit, time: new Date().toISOString() };
+    // stale: new code was pulled but not built, so the old code is still answering.
+    return { status: db === 'up' ? 'ok' : 'degraded', db, version: BUILD.version, commit: BUILD.commit, stale: BUILD.stale, time: new Date().toISOString() };
   }
 }

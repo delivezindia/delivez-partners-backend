@@ -2,7 +2,25 @@ import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-// What is running: package version + git commit (read once at startup; the server deploys with git pull).
+type Built = { commit: string | null; commitDate: string | null; builtAt: string | null };
+
+/**
+ * What is running: package version + the commit the compiled code was built from (dist/build-info.json, written by
+ * `pnpm build`). The folder's own git commit is kept as `checkout`: when the two differ, the server pulled new code
+ * but the build didn't run, so the old code is still serving (stale).
+ */
+export function describeBuild(version: string, built: Built | null, checkout: { commit: string | null; commitDate: string | null }) {
+  return {
+    version,
+    commit: built?.commit ?? checkout.commit,
+    commitDate: built?.commitDate ?? checkout.commitDate,
+    builtAt: built?.builtAt ?? null,
+    checkout: checkout.commit,
+    stale: !!(built?.commit && checkout.commit && built.commit !== checkout.commit),
+    startedAt: new Date().toISOString(),
+  };
+}
+
 function read() {
   let version = 'unknown';
   try {
@@ -11,15 +29,20 @@ function read() {
   } catch {
     /* keep unknown */
   }
-  let commit: string | null = null;
-  let commitDate: string | null = null;
+  let built: Built | null = null;
+  try {
+    built = JSON.parse(readFileSync(resolve(__dirname, '../build-info.json'), 'utf8'));
+  } catch {
+    /* not built with `pnpm build` (dev watch, tests, or an older build) */
+  }
+  const checkout: { commit: string | null; commitDate: string | null } = { commit: null, commitDate: null };
   try {
     const out = execSync('git log -1 --format=%h%n%cI', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }).toString().trim().split('\n');
-    [commit, commitDate] = [out[0] || null, out[1] || null];
+    [checkout.commit, checkout.commitDate] = [out[0] || null, out[1] || null];
   } catch {
     /* not a git checkout */
   }
-  return { version, commit, commitDate, startedAt: new Date().toISOString() };
+  return describeBuild(version, built, checkout);
 }
 
 export const BUILD = read();
