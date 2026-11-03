@@ -217,10 +217,20 @@ export const TEMPLATES: Record<string, Partial<Record<Lang, Copy>> & { EN: Copy 
     HI: (v) => ({ title: 'दस्तावेज़ दोबारा अपलोड करें', body: `${v.store} का ${v.label}: ${v.reason ?? 'फिर से अपलोड करें'}` }),
     KN: (v) => ({ title: 'ದಾಖಲೆ ಮತ್ತೆ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ', body: `${v.store} ನ ${v.label}: ${v.reason ?? 'ಮತ್ತೆ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ'}` }),
   },
+  // A resume leaves the store closed on purpose (the shop decides when it is ready), so that alert says to tap Open.
   STORE_STATUS: {
-    EN: (v) => ({ title: `${v.store} ${STATUS_TEXT.EN[String(v.to)] ?? 'was updated'}`, body: v.reason ? String(v.reason) : v.to === 'LIVE' ? 'Open your store to start getting orders.' : 'Open the app for details.' }),
-    HI: (v) => ({ title: `${v.store} ${STATUS_TEXT.HI[String(v.to)] ?? 'अपडेट हुआ'}`, body: v.reason ? String(v.reason) : 'विवरण के लिए ऐप खोलें।' }),
-    KN: (v) => ({ title: `${v.store} ${STATUS_TEXT.KN[String(v.to)] ?? 'ನವೀಕರಿಸಲಾಗಿದೆ'}`, body: v.reason ? String(v.reason) : 'ವಿವರಗಳಿಗೆ ಆ್ಯಪ್ ತೆರೆಯಿರಿ.' }),
+    EN: (v) =>
+      v.action === 'RESUME'
+        ? { title: `Orders resumed for ${v.store}`, body: 'Delivez has lifted the pause. Tap Open on your dashboard to start taking orders.' }
+        : { title: `${v.store} ${STATUS_TEXT.EN[String(v.to)] ?? 'was updated'}`, body: v.reason ? String(v.reason) : v.to === 'LIVE' ? 'Open your store to start getting orders.' : 'Open the app for details.' },
+    HI: (v) =>
+      v.action === 'RESUME'
+        ? { title: `${v.store} के ऑर्डर फिर से शुरू`, body: 'Delivez ने रोक हटा दी है। ऑर्डर लेने के लिए डैशबोर्ड पर “खुला” दबाएँ।' }
+        : { title: `${v.store} ${STATUS_TEXT.HI[String(v.to)] ?? 'अपडेट हुआ'}`, body: v.reason ? String(v.reason) : 'विवरण के लिए ऐप खोलें।' },
+    KN: (v) =>
+      v.action === 'RESUME'
+        ? { title: `${v.store} ಆರ್ಡರ್‌ಗಳು ಮತ್ತೆ ಆರಂಭ`, body: 'Delivez ತಡೆ ತೆಗೆದಿದೆ. ಆರ್ಡರ್ ಪಡೆಯಲು ಡ್ಯಾಶ್‌ಬೋರ್ಡ್‌ನಲ್ಲಿ “ತೆರೆದಿದೆ” ಒತ್ತಿ.' }
+        : { title: `${v.store} ${STATUS_TEXT.KN[String(v.to)] ?? 'ನವೀಕರಿಸಲಾಗಿದೆ'}`, body: v.reason ? String(v.reason) : 'ವಿವರಗಳಿಗೆ ಆ್ಯಪ್ ತೆರೆಯಿರಿ.' },
   },
   ADMIN_NOTICE: {
     EN: (v) => ({ title: `Message from Delivez · ${v.store}`, body: String(v.message ?? '') }),

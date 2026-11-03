@@ -238,7 +238,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         return this.toStore(e, storeId, LEADS, { app: 'PARTNERS', code: e.type === 'document.verified' ? 'DOC_VERIFIED' : 'DOC_REJECTED', vars: { label: d.label, reason: d.reason, store }, url: `/stores/${storeId}/settings?tab=documents`, tag: `doc-${d.documentId}`, offApp: e.type === 'document.rejected' ? OWNER_WA : undefined });
       }
       case 'store.status_changed':
-        return this.toStore(e, storeId!, LEADS, { app: 'PARTNERS', code: 'STORE_STATUS', vars: { store: await this.storeName(storeId!), to: d.to, reason: d.reason }, url: `/stores/${storeId}`, tag: `store-${storeId}`, offApp: OWNER_BOTH });
+        return this.toStore(e, storeId!, LEADS, { app: 'PARTNERS', code: 'STORE_STATUS', vars: { store: await this.storeName(storeId!), to: d.to, reason: d.reason, action: d.action }, url: `/stores/${storeId}`, tag: `store-${storeId}`, offApp: OWNER_BOTH });
       case 'store.admin_notice':
         return this.toStore(e, storeId!, null, { app: 'PARTNERS', code: 'ADMIN_NOTICE', vars: { store: await this.storeName(storeId!), message: d.message }, url: `/stores/${storeId}`, tag: `notice-${d.noticeId}`, offApp: OWNER_WA });
       case 'staff.invited': {
