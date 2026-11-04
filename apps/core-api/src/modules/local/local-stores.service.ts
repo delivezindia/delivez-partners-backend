@@ -7,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { imageUrl } from '../catalog/catalog.service';
 import { travelMinutes } from '../orders/order-state.service';
 import { DEFAULT_MAX_QTY, DELIVERY_FEE } from '../orders/orders.service';
+import { kindWhere } from './local-kinds';
 
 /** Labs are still listed for walk-in slot booking up to this far (a lab visit, not an order pickup). */
 const LAB_WALK_IN_KM = 10;
@@ -37,7 +38,7 @@ export class LocalStoresService {
         status: { in: [...RUNNING] },
         lat: { gte: q.lat - DEG_BOX, lte: q.lat + DEG_BOX },
         lng: { gte: q.lng - DEG_BOX, lte: q.lng + DEG_BOX },
-        ...(q.vertical ? { vertical: q.vertical } : {}),
+        ...kindWhere(q.vertical),
         ...(q.q
           ? {
               OR: [

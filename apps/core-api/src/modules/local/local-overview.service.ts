@@ -3,6 +3,7 @@ import type { Vertical } from '@delivez/db';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DELIVERY_FEE } from '../orders/orders.service';
 import { RETURN_WINDOW_MINUTES } from '../orders/returns-rules';
+import { countsAs } from './local-kinds';
 
 const RUNNING = ['LIVE', 'LIMITED'] as const;
 const VERTICALS: Vertical[] = ['EAT', 'GROCERY', 'PHARMACY', 'DIAGNOSTICS', 'LOCAL_STORES'];
@@ -36,14 +37,14 @@ export class LocalOverviewService {
     if (this.cache && Date.now() - this.cache.at < TTL_MS) return this.cache.value;
     const stores = await this.prisma.store.findMany({
       where: { status: { in: [...RUNNING] }, city: { isActive: true } },
-      select: { id: true, vertical: true, cuisines: true, cityId: true, categories: { where: { isActive: true, products: { some: { isAvailable: true } } }, select: { name: true } } },
+      select: { id: true, vertical: true, storeType: true, cuisines: true, cityId: true, categories: { where: { isActive: true, products: { some: { isAvailable: true } } }, select: { name: true } } },
     });
     const cityIds = [...new Set(stores.map((s) => s.cityId!))];
     const cities = await this.prisma.city.findMany({ where: { id: { in: cityIds } }, select: { id: true, name: true, state: true, centerLat: true, centerLng: true } });
 
     const verticals = Object.fromEntries(
       VERTICALS.map((v) => {
-        const mine = stores.filter((s) => s.vertical === v);
+        const mine = stores.filter((s) => countsAs(s, v));
         const counts = new Map<string, { name: string; shops: number }>();
         for (const s of mine) {
           // One vote per shop per type, matched case-insensitively ("Biryani" = "biryani").
