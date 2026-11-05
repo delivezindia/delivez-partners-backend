@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { correlationId } from './common/correlation-id.middleware';
@@ -12,7 +13,10 @@ import { BUILD } from './common/version';
 
 async function bootstrap() {
   // rawBody: the Razorpay webhook signs the exact bytes it sends.
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+  // nginx on this machine passes the visitor's address in X-Forwarded-For; believe it only from there, so req.ip is
+  // the real visitor (rate limits, sessions, audit log) and can't be faked from outside.
+  app.set('trust proxy', 'loopback');
   app.setGlobalPrefix('v1');
   // Frontends on other domains: list them in CORS_ORIGINS (localhost is always allowed for dev).
   app.enableCors({ origin: corsOrigin, credentials: true });

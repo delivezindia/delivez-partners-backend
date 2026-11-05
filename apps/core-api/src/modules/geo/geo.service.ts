@@ -33,29 +33,38 @@ export interface ResolvedLocation {
 }
 
 const NEAREST_CITY_MAX_KM = 60;
+/** New (not cached) lookups one visitor may make in LOOKUP_WINDOW_S: plenty for finding an address, not for scraping. */
+export const LOOKUPS_PER_WINDOW = 120;
+const LOOKUP_WINDOW_S = 10 * 60;
+/** Nominatim's usage policy: at most one request a second from the whole app. */
+const NOMINATIM_GAP_MS = 1000;
 
 /**
- * Geocoding uses OpenStreetMap Nominatim in dev (no key needed, low rate limit).
- * Swap to Google Geocoding (plan §3.2) by implementing the same two methods behind GOOGLE_MAPS_API_KEY.
+ * Geocoding uses OpenStreetMap Nominatim (no key needed, low rate limit). With a Google Maps key the customer app looks
+ * addresses up in the browser instead, so this stays a fallback. Swap to Google Geocoding (plan §3.2) by implementing
+ * the same two methods behind GOOGLE_MAPS_API_KEY.
  */
 @Injectable()
 export class GeoService {
   private readonly logger = new Logger(GeoService.name);
+  private nextNominatimAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly kv: KvService,
   ) {}
 
-  async search(query: string): Promise<GeocodeResult[]> {
+  async search(query: string, ip: string): Promise<GeocodeResult[]> {
     const params = new URLSearchParams({ q: query, format: 'jsonv2', addressdetails: '1', countrycodes: 'in', limit: '6' });
-    const rows = await this.nominatim<NominatimPlace[]>(`search?${params}`);
+    const rows = await this.nominatim<NominatimPlace[]>(`search?${params}`, ip);
     return rows.map(toResult);
   }
 
-  async reverse(lat: number, lng: number): Promise<GeocodeResult | null> {
-    const params = new URLSearchParams({ lat: String(lat), lon: String(lng), format: 'jsonv2', addressdetails: '1', zoom: '18' });
-    const row = await this.nominatim<NominatimPlace & { error?: string }>(`reverse?${params}`);
+  async reverse(lat: number, lng: number, ip: string): Promise<GeocodeResult | null> {
+    // About a metre: the same doorstep reads the same cached address.
+    const r5 = (n: number) => String(Math.round(n * 1e5) / 1e5);
+    const params = new URLSearchParams({ lat: r5(lat), lon: r5(lng), format: 'jsonv2', addressdetails: '1', zoom: '18' });
+    const row = await this.nominatim<NominatimPlace & { error?: string }>(`reverse?${params}`, ip);
     return row && !row.error ? toResult(row) : null;
   }
 
@@ -113,13 +122,22 @@ export class GeoService {
     };
   }
 
-  private async nominatim<T>(path: string): Promise<T> {
+  private async nominatim<T>(path: string, ip: string): Promise<T> {
     const cacheKey = `geo:nominatim:${path}`;
     const cached = await this.kv.get(cacheKey);
     if (cached) return JSON.parse(cached) as T;
+    // Only lookups that reach Nominatim count towards the visitor's allowance.
+    if ((await this.kv.incr(`geo:lookups:${ip}`, LOOKUP_WINDOW_S)) > LOOKUPS_PER_WINDOW) {
+      throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, 'GEOCODING_RATE_LIMITED', 'Too many address lookups. Wait a few minutes, or drag the pin and type the address.');
+    }
+    const now = Date.now();
+    const at = Math.max(now, this.nextNominatimAt);
+    this.nextNominatimAt = at + NOMINATIM_GAP_MS;
+    if (at > now) await new Promise((r) => setTimeout(r, at - now));
     try {
       const res = await fetch(`https://nominatim.openstreetmap.org/${path}`, {
-        headers: { 'user-agent': 'DelivezPartners/0.1 (local development)', 'accept-language': 'en' },
+        // Nominatim asks every app to say who it is.
+        headers: { 'user-agent': `Delivez/0.1 (${process.env.LOCAL_WEB_URL || 'local development'})`, 'accept-language': 'en' },
         signal: AbortSignal.timeout(8000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

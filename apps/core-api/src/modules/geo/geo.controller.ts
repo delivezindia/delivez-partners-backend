@@ -1,6 +1,7 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
+import type { ApiRequest } from '../../common/request-context';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ZodQuery } from '../../common/zod-query';
@@ -42,14 +43,17 @@ export class GeoController {
     return this.geo.pincode(code);
   }
 
-  // Authenticated: these proxy a rate-limited third-party service.
+  // Public, so a visitor can find their address before signing in. They proxy a rate-limited third-party service,
+  // so the service caps new lookups per visitor (IP) and paces them.
+  @Public()
   @Get('search')
-  search(@ZodQuery(searchSchema) query: z.infer<typeof searchSchema>) {
-    return this.geo.search(query.q);
+  search(@ZodQuery(searchSchema) query: z.infer<typeof searchSchema>, @Req() req: ApiRequest) {
+    return this.geo.search(query.q, req.ip ?? 'unknown');
   }
 
+  @Public()
   @Get('reverse')
-  reverse(@ZodQuery(reverseSchema) query: z.infer<typeof reverseSchema>) {
-    return this.geo.reverse(query.lat, query.lng);
+  reverse(@ZodQuery(reverseSchema) query: z.infer<typeof reverseSchema>, @Req() req: ApiRequest) {
+    return this.geo.reverse(query.lat, query.lng, req.ip ?? 'unknown');
   }
 }
