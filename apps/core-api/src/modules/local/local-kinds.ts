@@ -1,6 +1,6 @@
 import type { Prisma, StoreType, Vertical } from '@delivez/db';
 
-/** Street carts and society vendors: the customer app lists them under Rush, not under Local stores. */
+/** Street carts and society vendors: the customer app lists them under Street Cart, not under Local stores. */
 export const VENDOR_TYPES: StoreType[] = ['STREET_VENDOR', 'SOCIETY_VENDOR'];
 
 /** Which shops a customer list of one kind of shop shows (every kind when none is asked for). */

@@ -73,6 +73,10 @@ export class SystemController {
     add(dbOk ? 'ok' : 'error', 'Database', dbOk ? `Connected (${dbMs} ms)` : 'Cannot reach PostgreSQL — check DATABASE_URL and that the database is running');
     if (this.kv.mode === 'memory') add(prod ? 'warn' : 'ok', 'Redis', 'Not configured (REDIS_URL empty) — login limits reset when the API restarts');
     else add(redisOk ? 'ok' : 'error', 'Redis', redisOk ? 'Connected' : 'REDIS_URL is set but Redis does not answer');
+    const rzpTest = process.env.RAZORPAY_KEY_ID?.trim().startsWith('rzp_test_');
+    if (process.env.PAYMENT_GATEWAY?.trim().toLowerCase() === 'dummy') add('warn', 'Payments', 'Dummy payments (PAYMENT_GATEWAY=dummy): customers pay on a test screen and no real money moves. Remove it and add Razorpay keys before launch');
+    else if (process.env.RAZORPAY_KEY_ID?.trim() && process.env.RAZORPAY_KEY_SECRET?.trim()) add(rzpTest && prod ? 'warn' : 'ok', 'Payments', rzpTest ? 'Razorpay test keys: no real money moves' : 'Razorpay live keys');
+    else add(prod ? 'error' : 'ok', 'Payments', prod ? 'No payment gateway: customers can’t order online. Add Razorpay keys, or PAYMENT_GATEWAY=dummy for testing' : 'No gateway: development marks online payments paid straight away');
     if (pushSender.mode === 'firebase') add('ok', 'Push', `Sending via Firebase project ${pushSender.projectId}`);
     else add(prod ? 'error' : 'warn', 'Push', pushSender.problem ?? 'Not sending');
     if (!web.webReady) add('error', 'Push', `Browsers cannot turn on alerts — missing in .env: ${web.missing.join(', ')}`);

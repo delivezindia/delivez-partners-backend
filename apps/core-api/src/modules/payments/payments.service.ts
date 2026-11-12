@@ -10,7 +10,9 @@ const METHOD: Record<string, PaymentMode> = { upi: 'UPI', card: 'CARD', netbanki
 const PREFER: Partial<Record<PaymentMode, string>> = { UPI: 'upi', CARD: 'card', NETBANKING: 'netbanking' };
 
 export interface CheckoutParams {
-  gateway: 'RAZORPAY';
+  /** DUMMY (PAYMENT_GATEWAY=dummy): the app shows its test payment screen and sends back `dummy`'s id and signature. */
+  gateway: 'RAZORPAY' | 'DUMMY';
+  dummy?: { paymentId: string; signature: string };
   keyId: string;
   orderId: string;
   amount: number;
@@ -55,7 +57,8 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit() {
-    if (this.rzp.enabled) this.logger.log(`Razorpay on (${this.rzp.testMode ? 'TEST' : 'LIVE'} keys)`);
+    if (this.rzp.dummy) this.logger.warn('Dummy payments on (PAYMENT_GATEWAY=dummy): no real money is taken or refunded');
+    else if (this.rzp.enabled) this.logger.log(`Razorpay on (${this.rzp.testMode ? 'TEST' : 'LIVE'} keys)`);
     if (process.env.DISABLE_SCHEDULERS !== 'true') this.timer = setInterval(() => void this.tick(), TICK_MS);
   }
   onModuleDestroy() {
@@ -81,7 +84,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     }
     const u = o.customer.user;
     return {
-      gateway: 'RAZORPAY',
+      ...this.rzp.checkoutFields(rzpOrderId),
       keyId: this.rzp.keyId,
       orderId: rzpOrderId,
       amount: o.grandTotal,

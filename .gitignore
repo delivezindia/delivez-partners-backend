@@ -14,3 +14,7 @@ secrets.zip
 
 # OCR language data downloaded by tesseract.js when run in Node (tests/debugging)
 *.traineddata
+
+# Written on a server by scripts/sample-shops.mjs
+sample-shops-imported.json
+sample-shops-removed-*.json

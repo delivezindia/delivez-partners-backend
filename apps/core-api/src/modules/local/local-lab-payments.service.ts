@@ -55,7 +55,7 @@ export class LocalLabPaymentsService implements OnModuleInit, OnModuleDestroy {
       return {
         paymentId: lp.id,
         checkout: {
-          gateway: 'RAZORPAY',
+          ...this.payments.rzp.checkoutFields(r.id),
           keyId: this.payments.rzp.keyId,
           orderId: r.id,
           amount: grandTotal,
