@@ -32,12 +32,18 @@ export function opening(text: string | null): { day: string; time: string } | nu
 export class LocalStoresService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async nearby(q: { lat: number; lng: number; vertical?: Vertical; q?: string }) {
+  /**
+   * `all`: every live shop in every active city, each still marked with whether it delivers to lat/lng and how far it
+   * is (the home page lists them all and filters by kind). Otherwise only the shops around lat/lng.
+   */
+  async nearby(q: { lat: number; lng: number; vertical?: Vertical; q?: string; all?: string }) {
+    const all = !!q.all;
     const rows = await this.prisma.store.findMany({
       where: {
         status: { in: [...RUNNING] },
-        lat: { gte: q.lat - DEG_BOX, lte: q.lat + DEG_BOX },
-        lng: { gte: q.lng - DEG_BOX, lte: q.lng + DEG_BOX },
+        ...(all
+          ? { city: { isActive: true }, lat: { not: null }, lng: { not: null } }
+          : { lat: { gte: q.lat - DEG_BOX, lte: q.lat + DEG_BOX }, lng: { gte: q.lng - DEG_BOX, lte: q.lng + DEG_BOX } }),
         ...kindWhere(q.vertical),
         ...(q.q
           ? {
@@ -67,7 +73,7 @@ export class LocalStoresService {
         const radius = s.status === 'LIMITED' ? Math.min(LIMITED_RADIUS_KM, s.deliveryRadiusKm) : s.deliveryRadiusKm;
         return { s, km, delivers: s.supportsDelivery && km <= radius };
       })
-      .filter((x) => x.delivers || (x.s.vertical === 'DIAGNOSTICS' && x.s.supportsPickup && x.km <= LAB_WALK_IN_KM))
+      .filter((x) => all || x.delivers || (x.s.vertical === 'DIAGNOSTICS' && x.s.supportsPickup && x.km <= LAB_WALK_IN_KM))
       .map(({ s, km, delivers }) => {
         const open = s.openState !== 'CLOSED';
         const prep = s.defaultPrepMinutes + (s.openState === 'BUSY' ? 10 : 0);

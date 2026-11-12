@@ -1661,13 +1661,7 @@
   "lc.hm.sortFilter": "Sort and filter",
   "lc.hm.cat.all": "All categories",
   "lc.hm.cat.gifts": "Gifts & Flowers",
-  "lc.hm.near.tag": "Nearby stores",
-  "lc.hm.near.title": "Stores Near You",
-  "lc.hm.near.introTo": "Real shops that deliver to {where}. Filter, then tap a shop to see what it sells.",
-  "lc.hm.near.introAround": "Real shops that deliver around {where}. Filter, then tap a shop to see what it sells.",
-  "lc.hm.near.introYou": "Real shops that deliver near you. Filter, then tap a shop to see what it sells.",
   "lc.hm.near.empty": "No shops match these filters yet.",
-  "lc.hm.near.viewAll": "View all {n} nearby stores",
   "lc.hm.street.s1": "Order placed",
   "lc.hm.street.s2": "Picked by the shop",
   "lc.hm.street.s3": "Packed",
@@ -2086,5 +2080,9 @@
   "lc.rush.fq3": "How is Rush different from Grocery?",
   "lc.rush.fa3": "Grocery lists shops near you, each with its own stock and prices. Rush will sell from Delivez’s own stock.",
   "lc.browse.note": "Showing shops around {city}. Set your location to see the ones that deliver to you.",
-  "lc.browse.set": "Set location"
+  "lc.browse.set": "Set location",
+  "lc.hm.all.tag": "All shops",
+  "lc.hm.all.title": "Every shop on Delivez.",
+  "lc.hm.all.intro": "All {n} live shops, in every city. Pick a category to filter. Shops that deliver to you come first.",
+  "lc.hm.all.viewAll": "View all {n} shops"
 }

@@ -29,6 +29,8 @@ const nearbyQuery = z.object({
   lng,
   vertical: z.enum(VERTICALS).optional(),
   q: z.string().trim().min(2).max(60).optional(),
+  /** "1": every live shop in every active city (the home page's list), not only the ones near lat/lng. */
+  all: z.enum(['1', 'true']).optional(),
 });
 const menuQuery = z.object({ lat: lat.optional(), lng: lng.optional() });
 const meSchema = z.object({
