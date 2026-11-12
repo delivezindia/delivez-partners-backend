@@ -2084,5 +2084,7 @@
   "lc.rush.fq2": "When will Rush open?",
   "lc.rush.fa2": "Soon. It opens area by area as the warehouses are ready. Until then, order from grocery shops, pharmacies and street carts on Delivez.",
   "lc.rush.fq3": "How is Rush different from Grocery?",
-  "lc.rush.fa3": "Grocery lists shops near you, each with its own stock and prices. Rush will sell from Delivez’s own stock."
+  "lc.rush.fa3": "Grocery lists shops near you, each with its own stock and prices. Rush will sell from Delivez’s own stock.",
+  "lc.browse.note": "Showing shops around {city}. Set your location to see the ones that deliver to you.",
+  "lc.browse.set": "Set location"
 }
