@@ -10,6 +10,7 @@ import { ApiExceptionFilter } from './common/api-exception.filter';
 import { corsOrigin } from './common/public-url';
 import { docsBasicAuth, docsMode, DOCS_PATHS } from './common/docs-auth';
 import { BUILD } from './common/version';
+import { enrichApiDocs } from './common/zod-openapi';
 
 async function bootstrap() {
   // rawBody: the Razorpay webhook signs the exact bytes it sends.
@@ -31,8 +32,24 @@ async function bootstrap() {
   const docs = docsMode();
   if (docs === 'password') app.use(DOCS_PATHS, docsBasicAuth(process.env.DOCS_USERNAME!, process.env.DOCS_PASSWORD!));
   if (docs !== 'off') {
-    const swagger = new DocumentBuilder().setTitle('Delivez Core API').setVersion(BUILD.version).addBearerAuth().build();
-    SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swagger));
+    const swagger = new DocumentBuilder()
+      .setTitle('Delivez Core API')
+      .setVersion(BUILD.version)
+      .setDescription(
+        [
+          'One backend for the Partners app, the customer app (Local), the admin console, hub management and the rider app.',
+          '',
+          '**Login:** `POST /v1/auth/otp/request` → `POST /v1/auth/otp/verify` with `app` (PARTNERS, LOCAL, ADMIN, RIDER or ONE) → use `accessToken` as `Authorization: Bearer …` (Authorize button above). Tokens last 15 min; renew with `POST /v1/auth/refresh`.',
+          'Each route says which app\'s token it accepts; a token from another app gets `403 WRONG_APP`.',
+          '',
+          '**Errors:** `{ "error": { "code", "message", "details" } }`. `400 VALIDATION_FAILED` puts the message for each field in `details.fieldErrors`.',
+        ].join('\n'),
+      )
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, swagger);
+    enrichApiDocs(app, document);
+    SwaggerModule.setup('docs', app, document);
   }
 
   const port = Number(process.env.API_PORT ?? 4000);

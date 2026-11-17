@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Req, UseGuards, HttpStatus } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { z } from 'zod';
+import { ApiBearerAuth, ApiBody, ApiParam, ApiTags } from '@nestjs/swagger';
+import { z, type ZodTypeAny } from 'zod';
+import { zodToJsonSchema } from '../../common/zod-openapi';
 import type { OnboardingChannel } from '@delivez/db';
 import type { ApiRequest, AuthUser } from '../../common/request-context';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -114,6 +115,11 @@ export class OnboardingController {
     return this.onboarding.view(storeId);
   }
 
+  @ApiParam({ name: 'step', enum: Object.keys(STEP_SCHEMAS) })
+  @ApiBody({
+    description: 'The body depends on :step, one of these (each titled with its step).',
+    schema: { oneOf: Object.entries(STEP_SCHEMAS).map(([name, schema]) => ({ title: name, ...zodToJsonSchema(schema as ZodTypeAny) })) },
+  })
   @Patch('stores/:storeId/onboarding/steps/:step')
   @PartnerRoles('OWNER', 'MANAGER')
   saveStep(

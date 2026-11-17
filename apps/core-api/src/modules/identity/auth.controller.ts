@@ -64,4 +64,12 @@ export class AuthController {
   async logout(@CurrentUser() user: AuthUser, @Req() req: ApiRequest) {
     await this.auth.logout(user.userId, user.sessionId, req.ip);
   }
+
+  /** "Sign out everywhere": ends this user's sessions on every device of the same app (this one included). */
+  @ApiBearerAuth()
+  @Post('logout-all')
+  @HttpCode(200)
+  async logoutAll(@CurrentUser() user: AuthUser, @Req() req: ApiRequest) {
+    return { signedOut: await this.auth.revokeAll(user.userId, user.app, { ip: req.ip }) };
+  }
 }

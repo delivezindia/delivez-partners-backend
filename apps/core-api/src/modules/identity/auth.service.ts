@@ -144,6 +144,27 @@ export class AuthService {
     await this.audit.log({ actorUserId: userId, actorType: 'USER', entity: 'Session', entityId: sessionId, action: 'LOGOUT', ip });
   }
 
+  /**
+   * Ends every open session of the user in one app ("Sign out everywhere"), or in all apps when `app` is left out.
+   * Returns how many sessions were closed.
+   */
+  async revokeAll(userId: string, app?: AppId, audit?: { actorUserId?: string; actorType?: 'USER' | 'ADMIN'; ip?: string }) {
+    const open = await this.prisma.session.findMany({ where: { userId, revokedAt: null, ...(app ? { app } : {}) }, select: { id: true } });
+    if (!open.length) return 0;
+    await this.prisma.session.updateMany({ where: { id: { in: open.map((s) => s.id) }, revokedAt: null }, data: { revokedAt: new Date() } });
+    await Promise.all(open.map((s) => this.kv.set(revokedSessionKey(s.id), '1', ACCESS_TTL_SECONDS)));
+    await this.audit.log({
+      actorUserId: audit?.actorUserId ?? userId,
+      actorType: audit?.actorType ?? 'USER',
+      entity: 'User',
+      entityId: userId,
+      action: 'LOGOUT',
+      after: { app: app ?? 'ALL', sessions: open.length },
+      ip: audit?.ip,
+    });
+    return open.length;
+  }
+
   async partnerMemberships(userId: string) {
     const members = await this.prisma.partnerMember.findMany({
       where: { userId, isActive: true, partnerAccount: { isActive: true } },

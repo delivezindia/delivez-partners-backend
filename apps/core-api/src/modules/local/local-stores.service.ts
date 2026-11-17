@@ -91,6 +91,9 @@ export class LocalStoresService {
           distanceKm: km,
           /** Which way the shop is from the address (degrees, 0 = north), for maps of what's around. */
           bearing: bearingDeg(q.lat, q.lng, s.lat!, s.lng!),
+          /** Where the shop is, for the real map. */
+          lat: s.lat!,
+          lng: s.lng!,
           open,
           /** When today's opening hours end ("HH:MM"); null without set hours. */
           closesAt: open ? closingNow(s.timings, now) : null,
@@ -204,6 +207,8 @@ export class LocalStoresService {
         logoUrl: img(s.logoUrl),
         coverUrl: img(s.coverUrl),
         address: [s.addressLine1, s.landmark, s.city?.name].filter(Boolean).join(', '),
+        lat: s.lat,
+        lng: s.lng,
         open: s.openState !== 'CLOSED',
         busy: s.openState === 'BUSY',
         opensAt: s.openState === 'CLOSED' ? opening(nextOpening(s.timings, now)) : null,

@@ -146,7 +146,7 @@ export class LocalLabsService {
       collectionType: b.collectionType,
       slotStart: b.slotStart,
       slotMinutes: b.slotMinutes,
-      lab: { id: b.store.id, name: b.store.name, slug: b.store.slug, phone: b.store.phone, address: b.store.addressLine1 },
+      lab: { id: b.store.id, name: b.store.name, slug: b.store.slug, phone: b.store.phone, address: b.store.addressLine1, at: b.store.lat != null && b.store.lng != null ? { lat: b.store.lat, lng: b.store.lng } : null },
       patient: { name: b.patientName, age: b.patientAge, gender: b.patientGender },
       address: b.address ? [(b.address as { line1?: string }).line1, (b.address as { pincode?: string }).pincode].filter(Boolean).join(', ') : null,
       tests: b.items.map((i) => ({ id: i.id, name: i.testName, price: i.unitPrice, sampleType: i.sampleType, fastingHours: i.fastingHours, reportHours: i.reportHours })),

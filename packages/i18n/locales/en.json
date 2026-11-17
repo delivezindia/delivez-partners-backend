@@ -2084,5 +2084,11 @@
   "lc.hm.all.tag": "All shops",
   "lc.hm.all.title": "Every shop on Delivez.",
   "lc.hm.all.intro": "All {n} live shops, in every city. Pick a category to filter. Shops that deliver to you come first.",
-  "lc.hm.all.viewAll": "View all {n} shops"
+  "lc.hm.all.viewAll": "View all {n} shops",
+  "lc.map.shops": "Shops on the map",
+  "lc.map.open": "View shop",
+  "lc.map.directions": "Get directions",
+  "lc.map.shopHere": "Where the shop is",
+  "lc.map.labHere": "Where the lab is",
+  "lc.map.order": "Your order on the map"
 }

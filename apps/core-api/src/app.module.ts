@@ -29,6 +29,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { SystemModule } from './modules/system/system.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
+import { RidersModule } from './modules/riders/riders.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { CouponsModule } from './modules/coupons/coupons.module';
     NotificationsModule,
     SystemModule,
     CouponsModule,
+    RidersModule,
     RealtimeModule,
   ],
   providers: [{ provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor }],

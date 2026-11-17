@@ -35,6 +35,8 @@ export const ROLES = {
   /** Customer coupons — Delivez pays for them. */
   MANAGE_COUPONS: ['FOUNDER', 'HEAD_OF_OPS', 'FINANCE'] as AdminRole[],
   VIEW_AUDIT: ['FOUNDER', 'HEAD_OF_OPS', 'COMPLIANCE', 'LEGAL', 'AUDITOR'] as AdminRole[],
+  /** Rider sign-ups: verify documents, approve / reject, suspend / reinstate riders. */
+  MANAGE_RIDERS: ['FOUNDER', 'HEAD_OF_OPS', 'REGIONAL_HEAD', 'CITY_OPS', 'COMPLIANCE'] as AdminRole[],
 };
 /** Roles only a FOUNDER may grant. */
 export const SENIOR_ROLES: AdminRole[] = ['FOUNDER', 'HEAD_OF_OPS'];

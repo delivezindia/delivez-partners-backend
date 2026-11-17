@@ -4,7 +4,8 @@ import { ApiError } from './api-exception.filter';
 
 // Usage: @Body(new ZodValidationPipe(schema)) body: z.infer<typeof schema>
 export class ZodValidationPipe<T> implements PipeTransform<unknown, T> {
-  constructor(private readonly schema: ZodSchema<T>) {}
+  // Public so the API docs can describe the body (see zod-openapi.ts).
+  constructor(readonly schema: ZodSchema<T>) {}
 
   transform(value: unknown): T {
     const result = this.schema.safeParse(value);

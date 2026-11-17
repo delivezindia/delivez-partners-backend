@@ -405,8 +405,11 @@ export class LocalOrdersService {
       landmark?: string;
       pincode?: string;
       contactName?: string;
+      lat?: number;
+      lng?: number;
     } | null;
     const task = o.deliveryTask;
+    const pos = (lat: number | null | undefined, lng: number | null | undefined) => (lat != null && lng != null ? { lat, lng } : null);
     const active = !['DELIVERED', 'COMPLETED', 'REJECTED', 'CANCELLED', 'DELIVERY_FAILED', 'REFUNDED'].includes(o.status);
     return {
       id: o.id,
@@ -421,8 +424,12 @@ export class LocalOrdersService {
         vertical: o.store.vertical,
         address: o.store.addressLine1,
         phone: o.store.phone,
+        /** Where the shop is, for the order map. */
+        at: pos(o.store.lat, o.store.lng),
       },
       address: addr ? [addr.line1, addr.landmark, addr.pincode].filter(Boolean).join(', ') : null,
+      /** Where it is being delivered, for the order map (null for pickup). */
+      dropAt: o.fulfilmentType === 'DELIVERY' ? pos(addr?.lat, addr?.lng) : null,
       items: o.items.map((i) => ({
         id: i.id,
         productId: i.productId,
@@ -478,6 +485,9 @@ export class LocalOrdersService {
             name: task.rider.user.fullName?.split(/\s+/)[0] ?? null,
             phone: task.rider.user.phone,
             status: task.status,
+            // The rider's last known spot, only while this order is on its way (not after delivery).
+            at: active ? pos(task.rider.lastLat, task.rider.lastLng) : null,
+            seenAt: active ? task.rider.lastSeenAt : null,
           }
         : null,
     };

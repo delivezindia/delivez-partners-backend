@@ -1591,13 +1591,82 @@ model Rider {
   avgRating   Float       @default(0)
   /// Paused by ops (no new orders). Offline without this = went offline unexpectedly.
   pausedAt    DateTime?
+  /// Set with status SUSPENDED: the app shows "Account restricted" with this reason.
+  suspendedAt   DateTime?
+  suspendReason String?
   createdAt   DateTime    @default(now())
 
-  tasks   DeliveryTask[]
-  batches DeliveryBatch[]
+  tasks       DeliveryTask[]
+  batches     DeliveryBatch[]
+  application RiderApplication?
+  documents   RiderDocument[]
 
   @@index([cityId, isOnline])
   @@map("riders")
+}
+
+// Rider app sign-up (Delivez Agent app): the steps a new delivery partner fills before ops approve them.
+enum RiderApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  REJECTED
+}
+
+enum RiderDocumentType {
+  PHOTO
+  DRIVING_LICENCE
+  VEHICLE_RC
+  VEHICLE_INSURANCE
+  BANK_PROOF
+}
+
+model RiderApplication {
+  id               String                 @id @default(uuid())
+  riderId          String                 @unique
+  rider            Rider                  @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  status           RiderApplicationStatus @default(DRAFT)
+  /// From the service-area pincode (null when the pincode is not in a Delivez city yet).
+  cityId           String?
+  personalInfo     Json?
+  legalVehicle     Json?
+  workTech         Json?
+  hyperlocal       Json?
+  trainingRole     Json?
+  safetyCompliance Json?
+  consentAt        DateTime?
+  submittedAt      DateTime?
+  reviewedById     String?
+  reviewedAt       DateTime?
+  /// What ops told the rider (changes needed / reason for rejection).
+  reviewNote       String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([status, submittedAt])
+  @@index([cityId, status])
+  @@map("rider_applications")
+}
+
+/// One current file per type; uploading again replaces it.
+model RiderDocument {
+  id           String            @id @default(uuid())
+  riderId      String
+  rider        Rider             @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  type         RiderDocumentType
+  fileKey      String
+  fileHash     String
+  status       DocumentStatus    @default(PENDING)
+  rejectReason String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@unique([riderId, type])
+  @@map("rider_documents")
 }
 
 // ---------------------------------------------------------------------
