@@ -2,7 +2,12 @@ import type { BankVerificationStatus, DocumentStatus, DocumentType, Vertical } f
 import type { FlowVersion, StepKey } from './flows';
 
 // Readiness score (plan §5.1.3): Σ weight × completion, completion ∈ {0, 0.5, 1}.
-// ≥ 80 → eligible for LIVE · 60–79 → LIMITED (soft launch) · < 60 → blocked with a fix-list.
+// ≥ 75 → eligible for LIVE · 60–74 → LIMITED (soft launch) · < 60 → blocked with a fix-list.
+
+/** Lowest readiness score that can be approved LIVE. */
+export const LIVE_READINESS = 75;
+/** Lowest readiness score that can soft-launch (LIMITED). */
+export const LIMITED_READINESS = 60;
 
 export interface ReadinessInput {
   flowVersion: FlowVersion;
@@ -177,7 +182,7 @@ export function computeReadiness(i: ReadinessInput): Readiness {
   }
 
   const score = Math.round(factors.reduce((s, x) => s + x.points, 0));
-  const gate: ReadinessGate = score >= 80 ? 'LIVE' : score >= 60 ? 'LIMITED' : 'BLOCKED';
+  const gate: ReadinessGate = score >= LIVE_READINESS ? 'LIVE' : score >= LIMITED_READINESS ? 'LIMITED' : 'BLOCKED';
   return { score, gate, factors };
 }
 

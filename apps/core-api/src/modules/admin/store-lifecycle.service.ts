@@ -6,7 +6,7 @@ import { EventBus } from '../../events/event-bus.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { requiredDocuments } from '../onboarding/flows';
 import { OnboardingService } from '../onboarding/onboarding.service';
-import { docLabel } from '../onboarding/readiness';
+import { docLabel, LIMITED_READINESS, LIVE_READINESS } from '../onboarding/readiness';
 import type { AdminContext } from './admin.guard';
 
 export type LifecycleAction = 'START_REVIEW' | 'APPROVE_LIVE' | 'APPROVE_LIMITED' | 'REQUEST_CHANGES' | 'REJECT' | 'SUSPEND' | 'REINSTATE' | 'PAUSE' | 'RESUME';
@@ -57,14 +57,14 @@ export class StoreLifecycleService {
     if (!store.cityId || store.lat == null || !store.addressLine1) problems.push('Store location is incomplete');
     if (target === 'LIVE') {
       if (!readiness) problems.push('This store has no onboarding record');
-      else if (readiness.score < 80) problems.push(`Readiness is ${readiness.score}; 80 is needed to go LIVE`);
+      else if (readiness.score < LIVE_READINESS) problems.push(`Readiness is ${readiness.score}; ${LIVE_READINESS} is needed to go LIVE`);
       const unverified = required.filter((t) => latest.get(t) !== 'VERIFIED');
       if (unverified.length) problems.push(`Verify ${unverified.map(docLabel).join(', ')}`);
     } else {
       if (store.vertical === 'PHARMACY') problems.push('Pharmacies cannot soft-launch; verify licences and approve as LIVE');
       if (store.vertical === 'DIAGNOSTICS') problems.push('Labs cannot soft-launch; verify NABL and registrations and approve as LIVE');
       if (!readiness) problems.push('This store has no onboarding record');
-      else if (readiness.score < 60) problems.push(`Readiness is ${readiness.score}; 60 is needed for LIMITED`);
+      else if (readiness.score < LIMITED_READINESS) problems.push(`Readiness is ${readiness.score}; ${LIMITED_READINESS} is needed for LIMITED`);
       const missing = required.filter((t) => !latest.has(t) || ['REJECTED', 'EXPIRED'].includes(latest.get(t)!));
       if (missing.length) problems.push(`Partner must upload ${missing.map(docLabel).join(', ')}`);
     }
